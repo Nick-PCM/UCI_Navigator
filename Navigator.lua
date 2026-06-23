@@ -301,6 +301,8 @@ end
 local function cappedPush(stack, pageIds)
   stack[#stack + 1] = pageIds
   local maxEntries = config.historyMaxEntries
+  if maxEntries == nil then maxEntries = 25 end
+  if maxEntries == false then return end
   if maxEntries and #stack > maxEntries then
     table.remove(stack, 1)
   end
@@ -313,10 +315,19 @@ local function clearHistory()
 end
 
 local function recordHistory(beforePageIds)
-  if samePageIds(beforePageIds, state.activePageIds) then return end
   cappedPush(historyBack, beforePageIds)
   historyForward = {}
   updateHistoryControls()
+end
+
+local function updatePageOpenControls()
+  if not config then return end
+  for pageId, page in pairs(config.pages) do
+    local controls = page.controls
+    if controls and controls.open then
+      controls.open.Boolean = state.activePageIds[pageId] == true
+    end
+  end
 end
 
 local function restartPinEntryTimer()
@@ -370,6 +381,7 @@ local function showKeypad()
   else
     state.keypadVisible = true
   end
+  updatePageOpenControls()
   reconcileVisibility()
   restartPinEntryTimer()
 end
@@ -382,6 +394,7 @@ local function closeKeypad()
   else
     state.keypadVisible = false
   end
+  updatePageOpenControls()
   reconcileVisibility()
 end
 
@@ -570,10 +583,11 @@ local function validateConfig(candidate)
       historyControlKeys)
   end
   assert(candidate.historyMaxEntries == nil
+      or candidate.historyMaxEntries == false
       or type(candidate.historyMaxEntries) == "number"
         and candidate.historyMaxEntries >= 1
         and candidate.historyMaxEntries % 1 == 0,
-    "historyMaxEntries must be a positive integer")
+    "historyMaxEntries must be false or a positive integer")
 
   assert(type(candidate.pages) == "table", "pages must be a table")
   validateFrame("config", candidate.frame, false, candidate.access.levels)
@@ -667,6 +681,7 @@ function Navigator.setAccess(targetAccess)
       stopPinEntryTimer()
       stopSessionTimer()
       resetState()
+      updatePageOpenControls()
       reconcileVisibility()
     end
     return
@@ -678,6 +693,7 @@ function Navigator.setAccess(targetAccess)
     stopPinEntryTimer()
     stopSessionTimer()
     resetState()
+    updatePageOpenControls()
     reconcileVisibility()
     return
   end
@@ -690,6 +706,7 @@ function Navigator.setAccess(targetAccess)
     closeUnavailablePages(targetAccess)
   end
   state.access = targetAccess
+  updatePageOpenControls()
   reconcileVisibility()
   restartSessionTimer()
 end
@@ -706,6 +723,11 @@ function Navigator.openPage(pageId)
   local beforePageIds = copyActivePageIds()
   if not page.parentId then
     activateRootPage(pageId)
+    if samePageIds(beforePageIds, state.activePageIds) then
+      updatePageOpenControls()
+      return
+    end
+    updatePageOpenControls()
     reconcileVisibility()
     recordHistory(beforePageIds)
     return
@@ -725,6 +747,11 @@ function Navigator.openPage(pageId)
   end
 
   state.activePageIds[pageId] = true
+  if samePageIds(beforePageIds, state.activePageIds) then
+    updatePageOpenControls()
+    return
+  end
+  updatePageOpenControls()
   reconcileVisibility()
   recordHistory(beforePageIds)
 end
@@ -740,6 +767,11 @@ function Navigator.closePage(pageId)
 
   local beforePageIds = copyActivePageIds()
   closeBranch(pageId)
+  if samePageIds(beforePageIds, state.activePageIds) then
+    updatePageOpenControls()
+    return
+  end
+  updatePageOpenControls()
   reconcileVisibility()
   recordHistory(beforePageIds)
 end
@@ -775,6 +807,7 @@ end
 
 local function restoreActivePageIds(pageIds)
   state.activePageIds = copyTable(pageIds)
+  updatePageOpenControls()
   reconcileVisibility()
 end
 
@@ -919,6 +952,7 @@ function Navigator.configure(projectConfig)
   validateConfig(projectConfig)
   config = projectConfig
   resetState()
+  updatePageOpenControls()
   reconcileVisibility()
   bindControls()
 end

@@ -47,7 +47,8 @@ Navigator.configure({
     back = Controls["Back"],
     forward = Controls["Forward"],
   },
-  -- historyMaxEntries = 25, -- Optional. Omit for uncapped history.
+  -- historyMaxEntries = 25, -- Optional. Defaults to 25.
+  -- historyMaxEntries = false, -- Optional. Use uncapped history.
 
   frame = {
     background = { views = { default = { "Background" } } },

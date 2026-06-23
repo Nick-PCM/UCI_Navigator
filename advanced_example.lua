@@ -21,7 +21,7 @@ Navigator.configure({
     levels = {
       locked = { homePageId = "splash" },
       default = { homePageId = "home" },
-      advanced = {},
+      advanced = {homePageID = "home"},
     },
 
     -- The keypad page is referenced here so Navigator can apply keypad
@@ -58,7 +58,8 @@ Navigator.configure({
     back = Controls["Back"],
     forward = Controls["Forward"],
   },
-  -- historyMaxEntries = 25, -- Optional. Omit for uncapped history.
+  -- historyMaxEntries = 25, -- Optional. Defaults to 25.
+  -- historyMaxEntries = false, -- Optional. Use uncapped history.
 
   -- Default frame layers used by unlocked pages. These are inherited unless
   -- an active page supplies a frame override for the same role.
@@ -95,7 +96,7 @@ Navigator.configure({
       controls = {
         open = Controls["Home Nav"],
       },
-      views = { default = { "Home Page" } },
+      views = { default = { "Home Page" },  },
     },
 
     -- Section with a default child. Opening audio activates both audio and
@@ -129,8 +130,8 @@ Navigator.configure({
         open = Controls["Control Nav"],
       },
       views = {
-        default = { "Control Page" },
-        advanced = { "Advanced Control Page" },
+        default = { "Settings Page" },
+        advanced = { "Advanced Settings Page" },
       },
     },
   },

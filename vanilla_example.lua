@@ -59,7 +59,8 @@ Navigator.configure({
     back = Controls["Back"],
     forward = Controls["Forward"],
   },
-  -- historyMaxEntries = 25, -- Optional. Omit for uncapped history.
+  -- historyMaxEntries = 25, -- Optional. Defaults to 25.
+  -- historyMaxEntries = false, -- Optional. Use uncapped history.
 
   -- Frame entries are shared page-like layer groups. They use the same
   -- views pattern as pages. Every frame role must provide a default view.

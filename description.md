@@ -82,7 +82,7 @@ Navigator.configure({
     forward = Controls["Forward"],
   },
 
-  -- Optional. Omit for uncapped history.
+  -- Optional. Defaults to 25. Set to false for uncapped history.
   historyMaxEntries = 25,
 
   frame = {
@@ -209,11 +209,11 @@ pages = {
 }
 ```
 
-`controls.open` calls `Navigator.openPage(pageId)`. `controls.close` calls `Navigator.closePage(pageId)`, except the keypad page closes through keypad behavior. `controls.continue` changes directly to default access for no-keypad projects. `controls.openKeypad` and `controls.closeKeypad` are available only when `access.keypadRequired` is `true`.
+`controls.open` calls `Navigator.openPage(pageId)`. Open controls may be toggle buttons; Navigator sets each configured open control's `Boolean` value from the active page state after navigation, history movement, access changes, keypad changes, and initial configuration. `controls.close` calls `Navigator.closePage(pageId)`, except the keypad page closes through keypad behavior. `controls.continue` changes directly to default access for no-keypad projects. `controls.openKeypad` and `controls.closeKeypad` are available only when `access.keypadRequired` is `true`.
 
 Page open and close operations record page-set history when they change the active page set. Access changes, locked-state resets, keypad open/close actions, keypad timeout, session timeout, and direct no-keypad continue clear both history stacks. Repeated writes of the current unlocked access value do not clear history. Keypad screens are not back/forward navigable, and back/forward are no-ops while the keypad is showing.
 
-`historyMaxEntries` may be set to a positive integer to cap back and forward history. If it is omitted, history is uncapped.
+`historyMaxEntries` may be set to a positive integer to cap back and forward history. If it is omitted, Navigator keeps up to 25 entries in each stack. Set `historyMaxEntries = false` for uncapped history.
 
 `pinEntryTimeoutSeconds` controls keypad timeout and is required only when keypad access is enabled. `sessionTimeoutSeconds` controls unlocked access timeout. A value of `0` disables that timer. Activity pulses restart session timeout while default or a custom access level, and restart keypad timeout while the keypad is visible.
 
