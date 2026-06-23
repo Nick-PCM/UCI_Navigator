@@ -61,6 +61,16 @@ Navigator.configure({
   -- historyMaxEntries = 25, -- Optional. Defaults to 25.
   -- historyMaxEntries = false, -- Optional. Use uncapped history.
 
+  -- Optional runtime logging. Omitted categories are silent.
+  -- logging = {
+  --   access = true,
+  --   navigation = true,
+  --   history = true,
+  --   keypad = true,
+  --   timeout = true,
+  --   controls = true,
+  -- },
+
   -- Default frame layers used by unlocked pages. These are inherited unless
   -- an active page supplies a frame override for the same role.
   frame = {
@@ -78,7 +88,8 @@ Navigator.configure({
       controls = {
         openKeypad = Controls["Open_Keypad"],
       },
-      views = { locked = { "Splash", "Splash Controls" } },
+      -- views = { locked = { "Splash", "Splash Controls" } }, -- if you want some unlocked controls above splash
+      views = { locked = { "Splash",} },
     },
 
     -- Keypad close returns to splash while locked, or hides the keypad overlay
@@ -94,7 +105,7 @@ Navigator.configure({
     -- default view automatically.
     home = {
       controls = {
-        open = Controls["Home Nav"],
+        open = Controls["Home_Nav"],
       },
       views = { default = { "Home Page" },  },
     },
@@ -103,7 +114,7 @@ Navigator.configure({
     -- volume unless another child behavior closes volume later.
     audio = {
       controls = {
-        open = Controls["Audio Nav"],
+        open = Controls["Audio_Nav"],
       },
       views = { default = { "Audio Page" } },
       defaultChildId = "volume",
@@ -114,8 +125,8 @@ Navigator.configure({
     volume = {
       parentId = "audio",
       controls = {
-        open = Controls["Open Volume"],
-        close = Controls["Volume Back"],
+        open = Controls["Open_Volume"],
+        close = Controls["Close_Volume"],
       },
       views = { default = { "Volume Page" } },
       frame = {
@@ -127,7 +138,8 @@ Navigator.configure({
     -- If advanced were omitted here, Navigator would use the default view.
     settings = {
       controls = {
-        open = Controls["Control Nav"],
+        open = Controls["Settings_Nav"],
+        close = Controls["Close_Settings"],
       },
       views = {
         default = { "Settings Page" },

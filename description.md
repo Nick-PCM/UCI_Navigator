@@ -40,6 +40,7 @@ All destinations—including Splash and Keypad—are entries in one keyed `pages
 - Parent cycles and deeper hierarchies are rejected during configuration.
 - Only one root page is active at a time.
 - Closing a child also closes its active descendants; its parent remains active.
+- Closing a root section returns to the current access state's home page.
 - Page navigation history is maintained for page open/close changes.
 
 A parent uses `childDisplayMode` to allow one or multiple direct children. `SINGLE` is the default and closes active sibling branches when another child opens. `MULTIPLE` preserves active siblings.
@@ -84,6 +85,15 @@ Navigator.configure({
 
   -- Optional. Defaults to 25. Set to false for uncapped history.
   historyMaxEntries = 25,
+
+  logging = {
+    access = true,
+    navigation = true,
+    history = true,
+    keypad = true,
+    timeout = true,
+    controls = true,
+  },
 
   frame = {
     background = { views = { default = { "Background" } } },
@@ -209,13 +219,39 @@ pages = {
 }
 ```
 
-`controls.open` calls `Navigator.openPage(pageId)`. Open controls may be toggle buttons; Navigator sets each configured open control's `Boolean` value from the active page state after navigation, history movement, access changes, keypad changes, and initial configuration. `controls.close` calls `Navigator.closePage(pageId)`, except the keypad page closes through keypad behavior. `controls.continue` changes directly to default access for no-keypad projects. `controls.openKeypad` and `controls.closeKeypad` are available only when `access.keypadRequired` is `true`.
+`controls.open` calls `Navigator.openPage(pageId)`. Open controls may be toggle buttons; Navigator sets each configured open control's `Boolean` value from the active page state after navigation, history movement, access changes, keypad changes, and initial configuration. `controls.close` calls `Navigator.closePage(pageId)`, except the keypad page closes through keypad behavior. Closing a child closes that branch. Closing a root section returns to the locked home page while locked, or the default home page while default/custom access is active. `controls.continue` changes directly to default access for no-keypad projects. `controls.openKeypad` and `controls.closeKeypad` are available only when `access.keypadRequired` is `true`.
 
 Page open and close operations record page-set history when they change the active page set. Access changes, locked-state resets, keypad open/close actions, keypad timeout, session timeout, and direct no-keypad continue clear both history stacks. Repeated writes of the current unlocked access value do not clear history. Keypad screens are not back/forward navigable, and back/forward are no-ops while the keypad is showing.
 
 `historyMaxEntries` may be set to a positive integer to cap back and forward history. If it is omitted, Navigator keeps up to 25 entries in each stack. Set `historyMaxEntries = false` for uncapped history.
 
 `pinEntryTimeoutSeconds` controls keypad timeout and is required only when keypad access is enabled. `sessionTimeoutSeconds` controls unlocked access timeout. A value of `0` disables that timer. Activity pulses restart session timeout while default or a custom access level, and restart keypad timeout while the keypad is visible.
+
+## Logging
+
+Navigator can print selected runtime events using an optional `logging` table. Omit the table, omit a category, or set a category to `false` to leave that category silent.
+
+```lua
+logging = {
+  access = true,
+  navigation = true,
+  history = true,
+  keypad = true,
+  timeout = true,
+  controls = true,
+}
+```
+
+Supported categories are:
+
+- `access`: access transitions, locked resets, and ignored unknown access strings.
+- `navigation`: page open/close actions and no-op page opens.
+- `history`: history recording, clearing, back/forward, and no-op back/forward.
+- `keypad`: keypad show/close behavior.
+- `timeout`: pin-entry and session timeout events.
+- `controls`: button/control event handlers firing.
+
+When all categories are disabled, Navigator avoids building log messages and only performs a lightweight logging-enabled check.
 
 ## State and visibility
 
@@ -254,7 +290,7 @@ Standard controls are normally declared in `Navigator.configure(...)` instead of
 
 - `setAccess` changes authorization and applies its transition rules.
 - `openPage` derives root or child behavior from page configuration.
-- `closePage` closes an active nested page branch.
+- `closePage` closes an active child branch or returns an active root section to the current access state's home page.
 - `back` restores the previous active page set when available.
 - `forward` restores the next active page set after a back operation.
 

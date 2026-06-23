@@ -42,6 +42,8 @@ local historyForward = {}
 local visibleLayers = {}
 local visibilityInitialized = false
 local accessStateControl
+local logging = {}
+local anyLoggingEnabled = false
 
 -- Static set of supported frame role names. Keys are role names; true means
 -- the role is valid. This never changes at runtime.
@@ -64,8 +66,17 @@ local function setLayerVisibility(layerName, isVisible)
   )
 end
 
+local function isLockedAccess(access)
+  return access == Navigator.Access.LOCKED
+end
+
 local function homePageId(access)
   return config.access.levels[access].homePageId
+end
+
+local function currentHomePageId()
+  return homePageId(isLockedAccess(state.access)
+    and Navigator.Access.LOCKED or Navigator.Access.DEFAULT)
 end
 
 local function keypadRequired()
@@ -99,10 +110,6 @@ local function activateRootPage(pageId)
   if page.defaultChildId then
     state.activePageIds[page.defaultChildId] = true
   end
-end
-
-local function isLockedAccess(access)
-  return access == Navigator.Access.LOCKED
 end
 
 local function viewFor(page, access)
@@ -164,6 +171,14 @@ local function samePageIds(a, b)
     if not a[pageId] then return false end
   end
   return true
+end
+
+local function shouldLog(category)
+  return anyLoggingEnabled and logging[category] == true
+end
+
+local function log(category, message)
+  print("Navigator " .. category .. ": " .. message)
 end
 
 local function pageDepth(pageId)
@@ -309,15 +324,22 @@ local function cappedPush(stack, pageIds)
 end
 
 local function clearHistory()
+  local hadHistory = #historyBack > 0 or #historyForward > 0
   historyBack = {}
   historyForward = {}
   updateHistoryControls()
+  if hadHistory and shouldLog("history") then
+    log("history", "cleared")
+  end
 end
 
 local function recordHistory(beforePageIds)
   cappedPush(historyBack, beforePageIds)
   historyForward = {}
   updateHistoryControls()
+  if shouldLog("history") then
+    log("history", "recorded page set")
+  end
 end
 
 local function updatePageOpenControls()
@@ -376,9 +398,11 @@ local function showKeypad()
   assert(keypadRequired(), "keypad is not enabled")
   clearHistory()
   if state.access == Navigator.Access.LOCKED then
+    if shouldLog("keypad") then log("keypad", "show locked") end
     state.activePageIds = { [config.access.keypadPageId] = true }
     state.keypadVisible = false
   else
+    if shouldLog("keypad") then log("keypad", "show overlay") end
     state.keypadVisible = true
   end
   updatePageOpenControls()
@@ -390,8 +414,10 @@ local function closeKeypad()
   clearHistory()
   stopPinEntryTimer()
   if state.access == Navigator.Access.LOCKED then
+    if shouldLog("keypad") then log("keypad", "close locked") end
     activateRootPage(homePageId(Navigator.Access.LOCKED))
   else
+    if shouldLog("keypad") then log("keypad", "close overlay") end
     state.keypadVisible = false
   end
   updatePageOpenControls()
@@ -552,12 +578,34 @@ local historyControlKeys = {
   forward = true,
 }
 
+-- Static set of supported logging categories. Keys are field names;
+-- true means the category is valid. This never changes at runtime.
+local loggingKeys = {
+  access = true,
+  navigation = true,
+  history = true,
+  keypad = true,
+  timeout = true,
+  controls = true,
+}
+
 local function validateControls(ownerId, controls, allowedKeys)
   assert(type(controls) == "table", ownerId .. " must be a table")
   for key, control in pairs(controls) do
     assert(allowedKeys[key], ownerId .. "." .. tostring(key)
       .. " is not a supported control")
     assert(control ~= nil, ownerId .. "." .. key .. " must be a control")
+  end
+end
+
+local function validateLogging(candidate)
+  if candidate.logging == nil then return end
+  assert(type(candidate.logging) == "table", "logging must be a table")
+  for key, enabled in pairs(candidate.logging) do
+    assert(loggingKeys[key], "logging." .. tostring(key)
+      .. " is not a supported category")
+    assert(type(enabled) == "boolean",
+      "logging." .. key .. " must be true or false")
   end
 end
 
@@ -588,6 +636,7 @@ local function validateConfig(candidate)
         and candidate.historyMaxEntries >= 1
         and candidate.historyMaxEntries % 1 == 0,
     "historyMaxEntries must be false or a positive integer")
+  validateLogging(candidate)
 
   assert(type(candidate.pages) == "table", "pages must be a table")
   validateFrame("config", candidate.frame, false, candidate.access.levels)
@@ -669,6 +718,17 @@ local function validateConfig(candidate)
   validateHierarchy(candidate.pages)
 end
 
+local function configureLogging()
+  logging = config.logging or {}
+  anyLoggingEnabled = false
+  for _, enabled in pairs(logging) do
+    if enabled then
+      anyLoggingEnabled = true
+      return
+    end
+  end
+end
+
 -- Change access, prune unavailable pages, and apply layer visibility.
 function Navigator.setAccess(targetAccess)
   assert(config, "configure Navigator before changing access level")
@@ -677,6 +737,7 @@ function Navigator.setAccess(targetAccess)
 
   if targetAccess == state.access then
     if targetAccess == Navigator.Access.LOCKED then
+      if shouldLog("access") then log("access", "reset locked") end
       clearHistory()
       stopPinEntryTimer()
       stopSessionTimer()
@@ -687,6 +748,10 @@ function Navigator.setAccess(targetAccess)
     return
   end
 
+  local previousAccess = state.access
+  if shouldLog("access") then
+    log("access", previousAccess .. " -> " .. targetAccess)
+  end
   clearHistory()
 
   if targetAccess == Navigator.Access.LOCKED then
@@ -722,8 +787,10 @@ function Navigator.openPage(pageId)
 
   local beforePageIds = copyActivePageIds()
   if not page.parentId then
+    if shouldLog("navigation") then log("navigation", "open " .. pageId) end
     activateRootPage(pageId)
     if samePageIds(beforePageIds, state.activePageIds) then
+      if shouldLog("navigation") then log("navigation", "open " .. pageId .. " no-op") end
       updatePageOpenControls()
       return
     end
@@ -734,6 +801,7 @@ function Navigator.openPage(pageId)
   end
 
   assert(state.activePageIds[page.parentId], pageId .. " has an inactive parent")
+  if shouldLog("navigation") then log("navigation", "open " .. pageId) end
 
   local parent = config.pages[page.parentId]
   local mode = parent.childDisplayMode or Navigator.ChildDisplayMode.SINGLE
@@ -748,6 +816,7 @@ function Navigator.openPage(pageId)
 
   state.activePageIds[pageId] = true
   if samePageIds(beforePageIds, state.activePageIds) then
+    if shouldLog("navigation") then log("navigation", "open " .. pageId .. " no-op") end
     updatePageOpenControls()
     return
   end
@@ -756,18 +825,24 @@ function Navigator.openPage(pageId)
   recordHistory(beforePageIds)
 end
 
--- Close an active nested page branch; root pages cannot close.
+-- Close an active page. Child pages close their branch; root sections return
+-- to the home page for the current access state.
 function Navigator.closePage(pageId)
   assert(config, "configure Navigator before navigating")
 
   local page = config.pages[pageId]
   assert(page, "unknown pageId: " .. tostring(pageId))
-  assert(page.parentId, pageId .. " is a root page and cannot be closed")
   assert(state.activePageIds[pageId], pageId .. " is not active")
 
+  if shouldLog("navigation") then log("navigation", "close " .. pageId) end
   local beforePageIds = copyActivePageIds()
-  closeBranch(pageId)
+  if page.parentId then
+    closeBranch(pageId)
+  else
+    activateRootPage(currentHomePageId())
+  end
   if samePageIds(beforePageIds, state.activePageIds) then
+    if shouldLog("navigation") then log("navigation", "close " .. pageId .. " no-op") end
     updatePageOpenControls()
     return
   end
@@ -788,7 +863,9 @@ local function applyAccessString(accessString)
   local targetAccess = string.lower(tostring(accessString or ""))
   if targetAccess == "" then return end
   if not config.access.levels[targetAccess] then
-    print("Navigator ignored unknown access: " .. targetAccess)
+    if shouldLog("access") then
+      log("access", "ignored unknown " .. targetAccess)
+    end
     return
   end
   Navigator.setAccess(targetAccess)
@@ -814,10 +891,12 @@ end
 function Navigator.back()
   assert(config, "configure Navigator before navigating")
   if keypadIsShowing() or #historyBack == 0 then
+    if shouldLog("history") then log("history", "back no-op") end
     updateHistoryControls()
     return
   end
 
+  if shouldLog("history") then log("history", "back") end
   local currentPageIds = copyActivePageIds()
   local previousPageIds = historyBack[#historyBack]
   historyBack[#historyBack] = nil
@@ -829,10 +908,12 @@ end
 function Navigator.forward()
   assert(config, "configure Navigator before navigating")
   if keypadIsShowing() or #historyForward == 0 then
+    if shouldLog("history") then log("history", "forward no-op") end
     updateHistoryControls()
     return
   end
 
+  if shouldLog("history") then log("history", "forward") end
   local currentPageIds = copyActivePageIds()
   local nextPageIds = historyForward[#historyForward]
   historyForward[#historyForward] = nil
@@ -842,10 +923,12 @@ function Navigator.forward()
 end
 
 onPinEntryTimeout = function()
+  if shouldLog("timeout") then log("timeout", "pin entry") end
   closeKeypad()
 end
 
 onSessionTimeout = function()
+  if shouldLog("timeout") then log("timeout", "session") end
   requestAccess(Navigator.Access.LOCKED)
 end
 
@@ -860,6 +943,7 @@ local function bindControls()
     if accessControls.request then
       accessControls.request.EventHandler = function(control)
         if not isRisingEdge(control) then return end
+        if shouldLog("controls") then log("controls", "access request pressed") end
         if state.access == Navigator.Access.LOCKED
             and not keypadRequired() then
           requestAccess(Navigator.Access.DEFAULT)
@@ -874,12 +958,16 @@ local function bindControls()
 
     if accessControls.lock then
       accessControls.lock.EventHandler = function(control)
-        if isRisingEdge(control) then requestAccess(Navigator.Access.LOCKED) end
+        if isRisingEdge(control) then
+          if shouldLog("controls") then log("controls", "lock pressed") end
+          requestAccess(Navigator.Access.LOCKED)
+        end
       end
     end
 
     if accessControls.activityPulse then
       accessControls.activityPulse.EventHandler = function()
+        if shouldLog("controls") then log("controls", "activity pulse") end
         if keypadIsShowing() then restartPinEntryTimer() end
         restartSessionTimer()
       end
@@ -893,13 +981,21 @@ local function bindControls()
     if controls then
       if controls.open then
         controls.open.EventHandler = function(control)
-          if isRisingEdge(control) then Navigator.openPage(pageId) end
+          if isRisingEdge(control) then
+            if shouldLog("controls") then
+              log("controls", "open " .. pageId .. " pressed")
+            end
+            Navigator.openPage(pageId)
+          end
         end
       end
 
       if controls.close then
         controls.close.EventHandler = function(control)
           if not isRisingEdge(control) then return end
+          if shouldLog("controls") then
+            log("controls", "close " .. pageId .. " pressed")
+          end
           if keypadRequired() and pageId == config.access.keypadPageId then
             closeKeypad()
           else
@@ -910,19 +1006,28 @@ local function bindControls()
 
       if controls.continue then
         controls.continue.EventHandler = function(control)
-          if isRisingEdge(control) then requestAccess(Navigator.Access.DEFAULT) end
+          if isRisingEdge(control) then
+            if shouldLog("controls") then log("controls", "continue pressed") end
+            requestAccess(Navigator.Access.DEFAULT)
+          end
         end
       end
 
       if controls.openKeypad then
         controls.openKeypad.EventHandler = function(control)
-          if isRisingEdge(control) then showKeypad() end
+          if isRisingEdge(control) then
+            if shouldLog("controls") then log("controls", "open keypad pressed") end
+            showKeypad()
+          end
         end
       end
 
       if controls.closeKeypad then
         controls.closeKeypad.EventHandler = function(control)
-          if isRisingEdge(control) then closeKeypad() end
+          if isRisingEdge(control) then
+            if shouldLog("controls") then log("controls", "close keypad pressed") end
+            closeKeypad()
+          end
         end
       end
     end
@@ -932,13 +1037,19 @@ local function bindControls()
   if historyControls then
     if historyControls.back then
       historyControls.back.EventHandler = function(control)
-        if isRisingEdge(control) then Navigator.back() end
+        if isRisingEdge(control) then
+          if shouldLog("controls") then log("controls", "history back pressed") end
+          Navigator.back()
+        end
       end
     end
 
     if historyControls.forward then
       historyControls.forward.EventHandler = function(control)
-        if isRisingEdge(control) then Navigator.forward() end
+        if isRisingEdge(control) then
+          if shouldLog("controls") then log("controls", "history forward pressed") end
+          Navigator.forward()
+        end
       end
     end
 
@@ -951,6 +1062,7 @@ function Navigator.configure(projectConfig)
   assert(type(projectConfig) == "table", "configure requires a config table")
   validateConfig(projectConfig)
   config = projectConfig
+  configureLogging()
   resetState()
   updatePageOpenControls()
   reconcileVisibility()

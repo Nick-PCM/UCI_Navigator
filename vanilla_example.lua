@@ -62,6 +62,16 @@ Navigator.configure({
   -- historyMaxEntries = 25, -- Optional. Defaults to 25.
   -- historyMaxEntries = false, -- Optional. Use uncapped history.
 
+  -- Optional runtime logging. Omitted categories are silent.
+  -- logging = {
+  --   access = true,
+  --   navigation = true,
+  --   history = true,
+  --   keypad = true,
+  --   timeout = true,
+  --   controls = true,
+  -- },
+
   -- Frame entries are shared page-like layer groups. They use the same
   -- views pattern as pages. Every frame role must provide a default view.
   -- Locked normally omits frame layers unless a locked view is added here.
@@ -125,9 +135,11 @@ Navigator.configure({
     },
 
     -- Pages can be simple: a nav control plus one default view is enough.
+    -- A section close control returns to the default home page.
     settings = {
       controls = {
         open = Controls["Control Nav"],
+        close = Controls["Close Control"],
       },
       views = { default = { "Control Page" } },
     },

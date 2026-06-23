@@ -50,6 +50,16 @@ Navigator.configure({
   -- historyMaxEntries = 25, -- Optional. Defaults to 25.
   -- historyMaxEntries = false, -- Optional. Use uncapped history.
 
+  -- Optional runtime logging. Omitted categories are silent.
+  -- logging = {
+  --   access = true,
+  --   navigation = true,
+  --   history = true,
+  --   keypad = true,
+  --   timeout = true,
+  --   controls = true,
+  -- },
+
   frame = {
     background = { views = { default = { "Background" } } },
     header = { views = { default = { "Header" } } },
@@ -77,6 +87,7 @@ Navigator.configure({
     audio = {
       controls = {
         open = Controls["Audio Nav"],
+        close = Controls["Audio Back"],
       },
       views = { default = { "Audio Page" } },
       defaultChildId = "volume",
