@@ -41,6 +41,14 @@ Navigator.configure({
     activityPulse = Controls["Activity_Pulse"],
   },
 
+  -- Optional global history controls. They move through page navigation only;
+  -- access changes clear history.
+  historyControls = {
+    back = Controls["Back"],
+    forward = Controls["Forward"],
+  },
+  -- historyMaxEntries = 25, -- Optional. Omit for uncapped history.
+
   frame = {
     background = { views = { default = { "Background" } } },
     header = { views = { default = { "Header" } } },

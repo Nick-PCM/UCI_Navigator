@@ -53,6 +53,14 @@ Navigator.configure({
     activityPulse = Controls["Activity_Pulse"],
   },
 
+  -- Optional global history controls. They move through page navigation only;
+  -- access and keypad transitions clear history.
+  historyControls = {
+    back = Controls["Back"],
+    forward = Controls["Forward"],
+  },
+  -- historyMaxEntries = 25, -- Optional. Omit for uncapped history.
+
   -- Frame entries are shared page-like layer groups. They use the same
   -- views pattern as pages. Every frame role must provide a default view.
   -- Locked normally omits frame layers unless a locked view is added here.

@@ -52,6 +52,14 @@ Navigator.configure({
     activityPulse = Controls["Activity_Pulse"],
   },
 
+  -- Optional global history controls. They move through page navigation only;
+  -- access and keypad transitions clear history.
+  historyControls = {
+    back = Controls["Back"],
+    forward = Controls["Forward"],
+  },
+  -- historyMaxEntries = 25, -- Optional. Omit for uncapped history.
+
   -- Default frame layers used by unlocked pages. These are inherited unless
   -- an active page supplies a frame override for the same role.
   frame = {

@@ -36,6 +36,8 @@ local state = {
   activePageIds = {},
   keypadVisible = false,
 }
+local historyBack = {}
+local historyForward = {}
 -- Tracks layers Navigator last applied as visible.
 local visibleLayers = {}
 local visibilityInitialized = false
@@ -140,6 +142,28 @@ local function addLayers(destination, layerNames)
   for _, layerName in ipairs(layerNames) do
     destination[layerName] = true
   end
+end
+
+local function copyTable(source)
+  local result = {}
+  for key, value in pairs(source) do
+    result[key] = value
+  end
+  return result
+end
+
+local function copyActivePageIds()
+  return copyTable(state.activePageIds)
+end
+
+local function samePageIds(a, b)
+  for pageId in pairs(a) do
+    if not b[pageId] then return false end
+  end
+  for pageId in pairs(b) do
+    if not a[pageId] then return false end
+  end
+  return true
 end
 
 local function pageDepth(pageId)
@@ -267,6 +291,34 @@ local function stopSessionTimer()
   if Navigator._sessionTimer then Navigator._sessionTimer:Stop() end
 end
 
+local function updateHistoryControls()
+  local controls = config and config.historyControls
+  if not controls then return end
+  if controls.back then controls.back.IsDisabled = #historyBack == 0 end
+  if controls.forward then controls.forward.IsDisabled = #historyForward == 0 end
+end
+
+local function cappedPush(stack, pageIds)
+  stack[#stack + 1] = pageIds
+  local maxEntries = config.historyMaxEntries
+  if maxEntries and #stack > maxEntries then
+    table.remove(stack, 1)
+  end
+end
+
+local function clearHistory()
+  historyBack = {}
+  historyForward = {}
+  updateHistoryControls()
+end
+
+local function recordHistory(beforePageIds)
+  if samePageIds(beforePageIds, state.activePageIds) then return end
+  cappedPush(historyBack, beforePageIds)
+  historyForward = {}
+  updateHistoryControls()
+end
+
 local function restartPinEntryTimer()
   if not keypadRequired() then
     stopPinEntryTimer()
@@ -311,6 +363,7 @@ end
 
 local function showKeypad()
   assert(keypadRequired(), "keypad is not enabled")
+  clearHistory()
   if state.access == Navigator.Access.LOCKED then
     state.activePageIds = { [config.access.keypadPageId] = true }
     state.keypadVisible = false
@@ -322,6 +375,7 @@ local function showKeypad()
 end
 
 local function closeKeypad()
+  clearHistory()
   stopPinEntryTimer()
   if state.access == Navigator.Access.LOCKED then
     activateRootPage(homePageId(Navigator.Access.LOCKED))
@@ -478,6 +532,13 @@ local accessControlKeys = {
   activityPulse = true,
 }
 
+-- Static set of supported history control names. Keys are field names;
+-- true means the control name is valid. This never changes at runtime.
+local historyControlKeys = {
+  back = true,
+  forward = true,
+}
+
 local function validateControls(ownerId, controls, allowedKeys)
   assert(type(controls) == "table", ownerId .. " must be a table")
   for key, control in pairs(controls) do
@@ -504,6 +565,15 @@ local function validateConfig(candidate)
     assert(candidate.accessControls.state,
       "accessControls.state is required")
   end
+  if candidate.historyControls then
+    validateControls("historyControls", candidate.historyControls,
+      historyControlKeys)
+  end
+  assert(candidate.historyMaxEntries == nil
+      or type(candidate.historyMaxEntries) == "number"
+        and candidate.historyMaxEntries >= 1
+        and candidate.historyMaxEntries % 1 == 0,
+    "historyMaxEntries must be a positive integer")
 
   assert(type(candidate.pages) == "table", "pages must be a table")
   validateFrame("config", candidate.frame, false, candidate.access.levels)
@@ -593,6 +663,7 @@ function Navigator.setAccess(targetAccess)
 
   if targetAccess == state.access then
     if targetAccess == Navigator.Access.LOCKED then
+      clearHistory()
       stopPinEntryTimer()
       stopSessionTimer()
       resetState()
@@ -600,6 +671,8 @@ function Navigator.setAccess(targetAccess)
     end
     return
   end
+
+  clearHistory()
 
   if targetAccess == Navigator.Access.LOCKED then
     stopPinEntryTimer()
@@ -630,9 +703,11 @@ function Navigator.openPage(pageId)
   assert(viewFor(page, state.access),
     pageId .. " is unavailable for " .. state.access .. " access")
 
+  local beforePageIds = copyActivePageIds()
   if not page.parentId then
     activateRootPage(pageId)
     reconcileVisibility()
+    recordHistory(beforePageIds)
     return
   end
 
@@ -651,6 +726,7 @@ function Navigator.openPage(pageId)
 
   state.activePageIds[pageId] = true
   reconcileVisibility()
+  recordHistory(beforePageIds)
 end
 
 -- Close an active nested page branch; root pages cannot close.
@@ -662,8 +738,10 @@ function Navigator.closePage(pageId)
   assert(page.parentId, pageId .. " is a root page and cannot be closed")
   assert(state.activePageIds[pageId], pageId .. " is not active")
 
+  local beforePageIds = copyActivePageIds()
   closeBranch(pageId)
   reconcileVisibility()
+  recordHistory(beforePageIds)
 end
 
 local function isRisingEdge(control)
@@ -693,6 +771,41 @@ local function keypadIsShowing()
   return keypadRequired() and (state.keypadVisible
     or state.activePageIds[config.access.keypadPageId] == true
   )
+end
+
+local function restoreActivePageIds(pageIds)
+  state.activePageIds = copyTable(pageIds)
+  reconcileVisibility()
+end
+
+function Navigator.back()
+  assert(config, "configure Navigator before navigating")
+  if keypadIsShowing() or #historyBack == 0 then
+    updateHistoryControls()
+    return
+  end
+
+  local currentPageIds = copyActivePageIds()
+  local previousPageIds = historyBack[#historyBack]
+  historyBack[#historyBack] = nil
+  cappedPush(historyForward, currentPageIds)
+  restoreActivePageIds(previousPageIds)
+  updateHistoryControls()
+end
+
+function Navigator.forward()
+  assert(config, "configure Navigator before navigating")
+  if keypadIsShowing() or #historyForward == 0 then
+    updateHistoryControls()
+    return
+  end
+
+  local currentPageIds = copyActivePageIds()
+  local nextPageIds = historyForward[#historyForward]
+  historyForward[#historyForward] = nil
+  cappedPush(historyBack, currentPageIds)
+  restoreActivePageIds(nextPageIds)
+  updateHistoryControls()
 end
 
 onPinEntryTimeout = function()
@@ -781,6 +894,23 @@ local function bindControls()
       end
     end
   end
+
+  local historyControls = config.historyControls
+  if historyControls then
+    if historyControls.back then
+      historyControls.back.EventHandler = function(control)
+        if isRisingEdge(control) then Navigator.back() end
+      end
+    end
+
+    if historyControls.forward then
+      historyControls.forward.EventHandler = function(control)
+        if isRisingEdge(control) then Navigator.forward() end
+      end
+    end
+
+    updateHistoryControls()
+  end
 end
 
 function Navigator.configure(projectConfig)
@@ -793,19 +923,13 @@ function Navigator.configure(projectConfig)
   bindControls()
 end
 
-local function copyTable(source)
-  local result = {}
-  for key, value in pairs(source) do
-    result[key] = value
-  end
-  return result
-end
-
 function Navigator.getState()
   return {
     access = state.access,
     activePageIds = copyTable(state.activePageIds),
     keypadVisible = state.keypadVisible,
+    canGoBack = #historyBack > 0,
+    canGoForward = #historyForward > 0,
   }
 end
 
