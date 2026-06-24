@@ -9,6 +9,15 @@ Navigator.configure({
     transition = "none",
   },
 
+  logging = {
+    access = true,
+    navigation = true,
+    history = true,
+    keypad = true,
+    timeout = true,
+    controls = true,
+  },
+
   access = {
     levels = {
       locked = { homePageId = "splashPage" },
@@ -21,10 +30,10 @@ Navigator.configure({
   },
 
   accessControls = {
-    state = Controls["Access_State"],
-    request = Controls["Access_Request"],
-    lock = Controls["Lock_Request"],
-    activityPulse = Controls["Activity_Pulse"],
+    state = Controls["Access State"],
+    request = Controls["Access Request"],
+    lock = Controls["Lock Request"],
+    activityPulse = Controls["Activity Pulse"],
   },
 
   historyControls = {
@@ -93,7 +102,7 @@ Navigator.configure({
         locked = { "Splash" },
       },
       controls = {
-        openKeypad = Controls["Open_Keypad"],
+        openKeypad = Controls["Open Keypad"],
       },
     },
 
@@ -103,7 +112,7 @@ Navigator.configure({
         locked = { "Keypad" },
       },
       controls = {
-        close = Controls["Close_Keypad"],
+        close = Controls["Close Keypad"],
       },
     },
 
@@ -131,7 +140,7 @@ Navigator.configure({
     navPage = {
       pageGroup = "frameGroup",
       views = {
-        default = { "Nav Page" },
+        default = { "Navigation" },
       },
     },
 
@@ -141,7 +150,7 @@ Navigator.configure({
         default = { "Home" },
       },
       controls = {
-        open = Controls["Open_Home_Page"],
+        open = Controls["Open Home Page"],
       },
     },
 
@@ -151,7 +160,7 @@ Navigator.configure({
         default = { "Audio" },
       },
       controls = {
-        open = Controls["Open_Audio_Page"],
+        open = Controls["Open Audio Page"],
       },
     },
 
@@ -161,7 +170,7 @@ Navigator.configure({
         default = { "Audio Routing" },
       },
       controls = {
-        open = Controls["Open_Audio_Routing"],
+        open = Controls["Open Audio Routing"],
       },
     },
 
@@ -171,7 +180,7 @@ Navigator.configure({
         default = { "Audio Settings" },
       },
       controls = {
-        open = Controls["Open_Audio_Settings"],
+        open = Controls["Open Audio Settings"],
       },
     },
 
@@ -181,7 +190,7 @@ Navigator.configure({
         default = { "Video" },
       },
       controls = {
-        open = Controls["Open_Video_Page"],
+        open = Controls["Open Video Page"],
       },
     },
 
@@ -191,8 +200,8 @@ Navigator.configure({
         default = { "Video Routing" },
       },
       controls = {
-        open = Controls["Open_Video_Routing"],
-        close = Controls["Close_Video_Routing"],
+        open = Controls["Open Video Routing"],
+        close = Controls["Close Video Routing"],
       },
     },
 
@@ -202,8 +211,8 @@ Navigator.configure({
         default = { "Video Settings" },
       },
       controls = {
-        open = Controls["Open_Video_Settings"],
-        close = Controls["Close_Video_Settings"],
+        open = Controls["Open Video Settings"],
+        close = Controls["Close Video Settings"],
       },
     },
 
@@ -213,30 +222,30 @@ Navigator.configure({
         default = { "Video Test" },
       },
       controls = {
-        open = Controls["Open_Video_Test"],
-        close = Controls["Close_Video_Test"],
+        open = Controls["Open Video Test"],
+        close = Controls["Close Video Test"],
       },
     },
 
     powerPage = {
       pageGroup = "systemGroup",
       views = {
-        default = { "Power Page" },
+        default = { "Power" },
       },
       controls = {
-        open = Controls["Open_Power"],
-        close = Controls["Close_Power"],
+        open = Controls["Open Power"],
+        close = Controls["Close Power"],
       },
     },
 
     helpPage = {
       pageGroup = "systemGroup",
       views = {
-        default = { "Help Page" },
+        default = { "Help" },
       },
       controls = {
-        open = Controls["Open_Help"],
-        close = Controls["Close_Help"],
+        open = Controls["Open Help"],
+        close = Controls["Close Help"],
       },
     },
   },

@@ -48,10 +48,10 @@ Navigator.configure({
   },
 
   accessControls = {
-    state = Controls["Access_State"],
-    request = Controls["Access_Request"],
-    lock = Controls["Lock_Request"],
-    activityPulse = Controls["Activity_Pulse"],
+    state = Controls["Access State"],
+    request = Controls["Access Request"],
+    lock = Controls["Lock Request"],
+    activityPulse = Controls["Activity Pulse"],
   },
 
   historyControls = {
@@ -76,8 +76,8 @@ Navigator.configure({
         default = { "Layer Name" },
       },
       controls = {
-        open = Controls["Open_Page"],
-        close = Controls["Close_Page"],
+        open = Controls["Open Page"],
+        close = Controls["Close Page"],
       },
     },
   },
@@ -192,7 +192,7 @@ pages = {
       locked = { "Splash" },
     },
     controls = {
-      openKeypad = Controls["Open_Keypad"],
+      openKeypad = Controls["Open Keypad"],
     },
   },
 
@@ -202,7 +202,7 @@ pages = {
       locked = { "Keypad" },
     },
     controls = {
-      close = Controls["Keypad_Close"],
+      close = Controls["Keypad Close"],
     },
   },
 }
@@ -498,9 +498,9 @@ Keep the existing page-local control idea:
 
 ```lua
 controls = {
-  open = Controls["Audio_Nav"],
-  close = Controls["Audio_Close"],
-  openKeypad = Controls["Open_Keypad"],
+  open = Controls["Audio Nav"],
+  close = Controls["Audio Close"],
+  openKeypad = Controls["Open Keypad"],
 }
 ```
 

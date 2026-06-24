@@ -24,10 +24,10 @@ Navigator.configure({
   },
 
   accessControls = {
-    state = Controls["Access_State"],
-    request = Controls["Access_Request"],
-    lock = Controls["Lock_Request"],
-    activityPulse = Controls["Activity_Pulse"],
+    state = Controls["Access State"],
+    request = Controls["Access Request"],
+    lock = Controls["Lock Request"],
+    activityPulse = Controls["Activity Pulse"],
   },
 
   historyControls = {
@@ -96,7 +96,7 @@ Navigator.configure({
         locked = { "Splash" },
       },
       controls = {
-        openKeypad = Controls["Open_Keypad"],
+        openKeypad = Controls["Open Keypad"],
       },
     },
 
@@ -106,7 +106,7 @@ Navigator.configure({
         locked = { "Keypad" },
       },
       controls = {
-        close = Controls["Close_Keypad"],
+        close = Controls["Close Keypad"],
       },
     },
 
@@ -134,8 +134,8 @@ Navigator.configure({
     navPage = {
       pageGroup = "frameGroup",
       views = {
-        default = { "Nav Page" },
-        advanced = { "Nav Page", "Nav Advanced" },
+        default = { "Navigation" },
+        advanced = { "Navigation", "Navigation Advanced" },
       },
     },
 
@@ -146,7 +146,7 @@ Navigator.configure({
         advanced = { "Home", "Home Advanced" },
       },
       controls = {
-        open = Controls["Open_Home_Page"],
+        open = Controls["Open Home Page"],
       },
     },
 
@@ -157,7 +157,7 @@ Navigator.configure({
         advanced = { "Audio Advanced" },
       },
       controls = {
-        open = Controls["Open_Audio_Page"],
+        open = Controls["Open Audio Page"],
       },
     },
 
@@ -168,7 +168,7 @@ Navigator.configure({
         advanced = { "Audio Routing", "Audio Routing Advanced" },
       },
       controls = {
-        open = Controls["Open_Audio_Routing"],
+        open = Controls["Open Audio Routing"],
       },
     },
 
@@ -178,7 +178,7 @@ Navigator.configure({
         advanced = { "Audio Settings Advanced" },
       },
       controls = {
-        open = Controls["Open_Audio_Settings"],
+        open = Controls["Open Audio Settings"],
       },
     },
 
@@ -188,7 +188,7 @@ Navigator.configure({
         default = { "Video" },
       },
       controls = {
-        open = Controls["Open_Video_Page"],
+        open = Controls["Open Video Page"],
       },
     },
 
@@ -199,8 +199,8 @@ Navigator.configure({
         advanced = { "Video Routing", "Video Routing Advanced" },
       },
       controls = {
-        open = Controls["Open_Video_Routing"],
-        close = Controls["Close_Video_Routing"],
+        open = Controls["Open Video Routing"],
+        close = Controls["Close Video Routing"],
       },
     },
 
@@ -210,8 +210,8 @@ Navigator.configure({
         default = { "Video Settings" },
       },
       controls = {
-        open = Controls["Open_Video_Settings"],
-        close = Controls["Close_Video_Settings"],
+        open = Controls["Open Video Settings"],
+        close = Controls["Close Video Settings"],
       },
     },
 
@@ -221,8 +221,8 @@ Navigator.configure({
         default = { "Video Test" },
       },
       controls = {
-        open = Controls["Open_Video_Test"],
-        close = Controls["Close_Video_Test"],
+        open = Controls["Open Video Test"],
+        close = Controls["Close Video Test"],
       },
     },
 
@@ -232,8 +232,8 @@ Navigator.configure({
         default = { "Power Page" },
       },
       controls = {
-        open = Controls["Open_Power"],
-        close = Controls["Close_Power"],
+        open = Controls["Open Power"],
+        close = Controls["Close Power"],
       },
     },
 
@@ -243,8 +243,8 @@ Navigator.configure({
         default = { "Help Page" },
       },
       controls = {
-        open = Controls["Open_Help"],
-        close = Controls["Close_Help"],
+        open = Controls["Open Help"],
+        close = Controls["Close Help"],
       },
     },
   },
