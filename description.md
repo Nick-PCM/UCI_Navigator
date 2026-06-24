@@ -10,7 +10,7 @@ Project authors call `Navigator.configure(...)` with one project authoring table
 
 Project authoring provides:
 
-- The UCI name, optional UCI page name, and optional transition.
+- The optional UCI page name and optional transition.
 - The access levels used by this project.
 - The locked and default home page IDs.
 - Whether the project uses keypad access.
@@ -45,7 +45,7 @@ All destinations—including Splash and Keypad—are entries in one keyed `pages
 
 A parent uses `childDisplayMode` to allow one or multiple direct children. `SINGLE` is the default and closes active sibling branches when another child opens. `MULTIPLE` preserves active siblings.
 
-A child uses `parentVisibility` to keep or hide its parent's physical view. The parent remains logically active in either case so closing the child returns to it.
+A child hides its parent's physical view by default. The parent remains logically active, so closing the child returns to it. If the child should show the parent underneath, include the parent's layer name in the child view. A child may also set `parentVisibility = Navigator.ParentVisibility.KEEP` to keep the parent's resolved view visible automatically.
 
 A section may specify a direct default-capable `defaultChildId`. Opening that section, including as the default home page, activates the child automatically.
 
@@ -54,7 +54,6 @@ A section may specify a direct default-capable `defaultChildId`. Opening that se
 ```lua
 Navigator.configure({
   uci = {
-    name = "My UCI",
     pageName = "Main",
     transition = "none",
   },
@@ -104,7 +103,7 @@ Navigator.configure({
 
   pages = {
     home = {
-      controls = { open = Controls["Home Nav"] },
+      controls = { open = Controls["Home_Nav"] },
       views = { default = { "Home Page" } },
     },
   },
@@ -202,6 +201,33 @@ historyControls = {
 
 `historyControls.back` calls `Navigator.back()`. `historyControls.forward` calls `Navigator.forward()`. Both controls are optional, and Navigator updates `IsDisabled` only for configured controls. They are disabled when their corresponding stack is empty. If `historyControls` is omitted, history still works through the public `Navigator.back()` and `Navigator.forward()` functions without touching any Q-SYS history controls.
 
+Every control field except `accessControls.state` may be either one Q-SYS control or a list of equivalent controls. This lets replacement views use unique Q-SYS control names while sharing one logical Navigator action:
+
+```lua
+controls = {
+  open = {
+    Controls["Settings_Nav_Default"],
+    Controls["Settings_Nav_Advanced"],
+  },
+  close = {
+    Controls["Settings_Close_Default"],
+    Controls["Settings_Close_Advanced"],
+  },
+}
+```
+
+Navigator assigns the same event handler to every control in the list. For toggle open controls and history disabled state, Navigator updates every related physical control.
+
+Use underscore-separated Q-SYS control names so duplicated controls stay easy to scan:
+
+```text
+<PageId>_<Action>_<Context>
+Settings_Nav_Default
+Settings_Nav_Advanced
+Settings_Close_Default
+Settings_Close_Advanced
+```
+
 Page controls live with the page they operate on:
 
 ```lua
@@ -209,8 +235,8 @@ pages = {
   volume = {
     parentId = "audio",
     controls = {
-      open = Controls["Open Volume"],
-      close = Controls["Volume Back"],
+      open = Controls["Open_Volume"],
+      close = Controls["Volume_Back"],
     },
     views = {
       default = { "Volume Page" },
@@ -269,10 +295,10 @@ On initial configuration, Navigator explicitly assigns visibility to every confi
 Q-SYS calls use:
 
 ```lua
-Uci.SetLayerVisibility(UCI_Name, Page_Name, Layer_Name, Visibility, Transition_Type)
+Uci.SetLayerVisibility(Page_Name, Layer_Name, Visibility, Transition_Type)
 ```
 
-Configuration requires `uci.name`. `uci.pageName` defaults to `"Main"`, and `uci.transition` defaults to `"none"`.
+`uci.pageName` defaults to `"Main"`, and `uci.transition` defaults to `"none"`.
 
 ## Public runtime operations
 

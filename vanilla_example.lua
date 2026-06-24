@@ -7,10 +7,9 @@
 -- transitions, timers, and Q-SYS layer visibility.
 
 Navigator.configure({
-  -- UCI identifies the Q-SYS UCI and page whose layers Navigator controls.
-  -- Layer names below are Q-SYS layer names on this UCI page.
+  -- uci identifies the Q-SYS page whose layers Navigator controls.
+  -- Layer names below are Q-SYS layer names on this page.
   uci = {
-    name = "My UCI",
     -- pageName defaults to "Main".
     -- transition defaults to "none".
   },
@@ -108,7 +107,7 @@ Navigator.configure({
     -- the page and replaces the currently active root page.
     home = {
       controls = {
-        open = Controls["Home Nav"],
+        open = Controls["Home_Nav"],
       },
       views = { default = { "Home Page" } },
     },
@@ -117,7 +116,7 @@ Navigator.configure({
     -- direct child and must have a default-capable view.
     audio = {
       controls = {
-        open = Controls["Audio Nav"],
+        open = Controls["Audio_Nav"],
       },
       views = { default = { "Audio Page" } },
       defaultChildId = "volume",
@@ -128,8 +127,8 @@ Navigator.configure({
     volume = {
       parentId = "audio",
       controls = {
-        open = Controls["Open Volume"],
-        close = Controls["Volume Back"],
+        open = Controls["Open_Volume"],
+        close = Controls["Volume_Back"],
       },
       views = { default = { "Volume Page" } },
     },
@@ -138,8 +137,8 @@ Navigator.configure({
     -- A section close control returns to the default home page.
     settings = {
       controls = {
-        open = Controls["Control Nav"],
-        close = Controls["Close Control"],
+        open = Controls["Control_Nav"],
+        close = Controls["Close_Control"],
       },
       views = { default = { "Control Page" } },
     },

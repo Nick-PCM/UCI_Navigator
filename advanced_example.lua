@@ -9,7 +9,6 @@
 Navigator.configure({
   -- UCI identifies the Q-SYS UCI and page whose layers Navigator controls.
   uci = {
-    name = "My UCI",
     -- pageName defaults to "Main".
     -- transition defaults to "none".
   },
@@ -21,7 +20,7 @@ Navigator.configure({
     levels = {
       locked = { homePageId = "splash" },
       default = { homePageId = "home" },
-      advanced = {homePageID = "home"},
+      advanced = {},
     },
 
     -- The keypad page is referenced here so Navigator can apply keypad
@@ -62,14 +61,14 @@ Navigator.configure({
   -- historyMaxEntries = false, -- Optional. Use uncapped history.
 
   -- Optional runtime logging. Omitted categories are silent.
-  -- logging = {
-  --   access = true,
-  --   navigation = true,
-  --   history = true,
-  --   keypad = true,
-  --   timeout = true,
-  --   controls = true,
-  -- },
+  logging = {
+    access = true,
+    navigation = true,
+    -- history = true,
+    keypad = true,
+    timeout = true,
+    controls = true,
+  },
 
   -- Default frame layers used by unlocked pages. These are inherited unless
   -- an active page supplies a frame override for the same role.
@@ -107,7 +106,16 @@ Navigator.configure({
       controls = {
         open = Controls["Home_Nav"],
       },
-      views = { default = { "Home Page" },  },
+      views = { default = { "Home Page" }, advanced = {"Home Page", "Advanced Home Overlay"}  },
+    },
+
+    AdvancedHomeModal = {
+      parentId = "home",
+      controls = {
+        open = Controls["Open_Home_Modal"],
+        close = Controls["Close_Home_Modal"]
+      },
+      views = {advanced = {"Home Page", "Advanced Home Overlay", "Advanced Home Modal" } }
     },
 
     -- Section with a default child. Opening audio activates both audio and
@@ -117,7 +125,7 @@ Navigator.configure({
         open = Controls["Audio_Nav"],
       },
       views = { default = { "Audio Page" } },
-      defaultChildId = "volume",
+      -- defaultChildId = "volume",
     },
 
     -- This child overrides the footer frame role while it is active. The
@@ -138,13 +146,26 @@ Navigator.configure({
     -- If advanced were omitted here, Navigator would use the default view.
     settings = {
       controls = {
-        open = Controls["Settings_Nav"],
-        close = Controls["Close_Settings"],
+        open = {
+          Controls["Settings_Nav"],
+        },
+        close = {
+          Controls["Settings_Close_Default"],
+          Controls["Settings_Close_Advanced"],
+        },
       },
       views = {
         default = { "Settings Page" },
         advanced = { "Advanced Settings Page" },
       },
+    },
+    settingModal = {
+      parentId = "settings",
+      controls = {
+        open = { Controls["Open_Settings_Modal_Default"], Controls["Open_Settings_Modal_Advanced"]},
+        close = Controls["Close_Settings_Modal"],
+      },
+      views = { default = {"Settings Page", "Settings Modal Page" } },
     },
   },
 })

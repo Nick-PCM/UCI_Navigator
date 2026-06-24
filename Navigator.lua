@@ -20,9 +20,9 @@ Navigator.ChildDisplayMode = {
   MULTIPLE = "multiple",
 }
 
--- parentVisibility belongs on a child page. KEEP leaves the parent's physical
--- layer view visible. HIDE keeps the parent logically active but omits
--- its physical layer view while this child is active.
+-- parentVisibility belongs on a child page. HIDE is the default and keeps
+-- the parent logically active but omits its physical layer view while this
+-- child is active. KEEP leaves the parent's physical layer view visible.
 Navigator.ParentVisibility = {
   KEEP = "keep",
   HIDE = "hide",
@@ -58,7 +58,6 @@ local frameRoles = {
 -- uci.pageName is a Q-SYS UCI page, not a Navigator logical page ID.
 local function setLayerVisibility(layerName, isVisible)
   Uci.SetLayerVisibility(
-    config.uci.name,
     config.uci.pageName or "Main",
     layerName,
     isVisible,
@@ -125,7 +124,7 @@ local function resolvePageLayers()
   for pageId in pairs(state.activePageIds) do
     local page = config.pages[pageId]
     if page.parentId
-        and page.parentVisibility == Navigator.ParentVisibility.HIDE then
+        and page.parentVisibility ~= Navigator.ParentVisibility.KEEP then
       hiddenPageIds[page.parentId] = true
     end
   end
@@ -179,6 +178,21 @@ end
 
 local function log(category, message)
   print("Navigator " .. category .. ": " .. message)
+end
+
+local function isControlList(value)
+  return type(value) == "table" and value[1] ~= nil
+end
+
+local function forEachControl(controlOrList, callback)
+  if controlOrList == nil then return end
+  if isControlList(controlOrList) then
+    for _, control in ipairs(controlOrList) do
+      callback(control)
+    end
+  else
+    callback(controlOrList)
+  end
 end
 
 local function pageDepth(pageId)
@@ -309,8 +323,12 @@ end
 local function updateHistoryControls()
   local controls = config and config.historyControls
   if not controls then return end
-  if controls.back then controls.back.IsDisabled = #historyBack == 0 end
-  if controls.forward then controls.forward.IsDisabled = #historyForward == 0 end
+  forEachControl(controls.back, function(control)
+    control.IsDisabled = #historyBack == 0
+  end)
+  forEachControl(controls.forward, function(control)
+    control.IsDisabled = #historyForward == 0
+  end)
 end
 
 local function cappedPush(stack, pageIds)
@@ -347,7 +365,9 @@ local function updatePageOpenControls()
   for pageId, page in pairs(config.pages) do
     local controls = page.controls
     if controls and controls.open then
-      controls.open.Boolean = state.activePageIds[pageId] == true
+      forEachControl(controls.open, function(control)
+        control.Boolean = state.activePageIds[pageId] == true
+      end)
     end
   end
 end
@@ -591,10 +611,18 @@ local loggingKeys = {
 
 local function validateControls(ownerId, controls, allowedKeys)
   assert(type(controls) == "table", ownerId .. " must be a table")
-  for key, control in pairs(controls) do
+  for key, controlOrList in pairs(controls) do
     assert(allowedKeys[key], ownerId .. "." .. tostring(key)
       .. " is not a supported control")
-    assert(control ~= nil, ownerId .. "." .. key .. " must be a control")
+    assert(controlOrList ~= nil, ownerId .. "." .. key .. " must be a control")
+    if isControlList(controlOrList) then
+      assert(#controlOrList > 0,
+        ownerId .. "." .. key .. " control list cannot be empty")
+      for index, control in ipairs(controlOrList) do
+        assert(control ~= nil,
+          ownerId .. "." .. key .. "[" .. index .. "] must be a control")
+      end
+    end
   end
 end
 
@@ -611,7 +639,8 @@ end
 
 local function validateConfig(candidate)
   assert(type(candidate.uci) == "table", "uci must be a table")
-  assert(type(candidate.uci.name) == "string" and candidate.uci.name ~= "",
+  assert(candidate.uci.name == nil
+      or type(candidate.uci.name) == "string" and candidate.uci.name ~= "",
     "uci.name must be a non-empty string")
   assert(candidate.uci.pageName == nil
       or type(candidate.uci.pageName) == "string" and candidate.uci.pageName ~= "",
@@ -625,6 +654,8 @@ local function validateConfig(candidate)
     validateControls("accessControls", candidate.accessControls, accessControlKeys)
     assert(candidate.accessControls.state,
       "accessControls.state is required")
+    assert(not isControlList(candidate.accessControls.state),
+      "accessControls.state must be a single control")
   end
   if candidate.historyControls then
     validateControls("historyControls", candidate.historyControls,
@@ -851,10 +882,6 @@ function Navigator.closePage(pageId)
   recordHistory(beforePageIds)
 end
 
-local function isRisingEdge(control)
-  return control.Boolean ~= false
-end
-
 local function writeAccessState(targetAccess)
   if accessStateControl then accessStateControl.String = targetAccess end
 end
@@ -941,36 +968,39 @@ local function bindControls()
     end
 
     if accessControls.request then
-      accessControls.request.EventHandler = function(control)
-        if not isRisingEdge(control) then return end
-        if shouldLog("controls") then log("controls", "access request pressed") end
-        if state.access == Navigator.Access.LOCKED
-            and not keypadRequired() then
-          requestAccess(Navigator.Access.DEFAULT)
-        elseif state.access == Navigator.Access.DEFAULT
-            and keypadRequired() then
-          showKeypad()
-        elseif not isLockedAccess(state.access) then
-          requestAccess(Navigator.Access.DEFAULT)
+      forEachControl(accessControls.request, function(requestControl)
+        requestControl.EventHandler = function()
+          if shouldLog("controls") then log("controls", "access request pressed") end
+          if state.access == Navigator.Access.LOCKED
+              and not keypadRequired() then
+            requestAccess(Navigator.Access.DEFAULT)
+          elseif state.access == Navigator.Access.DEFAULT
+              and keypadRequired() then
+            showKeypad()
+          elseif not isLockedAccess(state.access) then
+            requestAccess(Navigator.Access.DEFAULT)
+          end
         end
-      end
+      end)
     end
 
     if accessControls.lock then
-      accessControls.lock.EventHandler = function(control)
-        if isRisingEdge(control) then
+      forEachControl(accessControls.lock, function(lockControl)
+        lockControl.EventHandler = function()
           if shouldLog("controls") then log("controls", "lock pressed") end
           requestAccess(Navigator.Access.LOCKED)
         end
-      end
+      end)
     end
 
     if accessControls.activityPulse then
-      accessControls.activityPulse.EventHandler = function()
-        if shouldLog("controls") then log("controls", "activity pulse") end
-        if keypadIsShowing() then restartPinEntryTimer() end
-        restartSessionTimer()
-      end
+      forEachControl(accessControls.activityPulse, function(activityPulseControl)
+        activityPulseControl.EventHandler = function()
+          if shouldLog("controls") then log("controls", "activity pulse") end
+          if keypadIsShowing() then restartPinEntryTimer() end
+          restartSessionTimer()
+        end
+      end)
     end
 
     applyAccessString(accessStateControl.String)
@@ -980,55 +1010,56 @@ local function bindControls()
     local controls = page.controls
     if controls then
       if controls.open then
-        controls.open.EventHandler = function(control)
-          if isRisingEdge(control) then
+        forEachControl(controls.open, function(openControl)
+          openControl.EventHandler = function()
             if shouldLog("controls") then
               log("controls", "open " .. pageId .. " pressed")
             end
             Navigator.openPage(pageId)
           end
-        end
+        end)
       end
 
       if controls.close then
-        controls.close.EventHandler = function(control)
-          if not isRisingEdge(control) then return end
-          if shouldLog("controls") then
-            log("controls", "close " .. pageId .. " pressed")
+        forEachControl(controls.close, function(closeControl)
+          closeControl.EventHandler = function()
+            if shouldLog("controls") then
+              log("controls", "close " .. pageId .. " pressed")
+            end
+            if keypadRequired() and pageId == config.access.keypadPageId then
+              closeKeypad()
+            else
+              Navigator.closePage(pageId)
+            end
           end
-          if keypadRequired() and pageId == config.access.keypadPageId then
-            closeKeypad()
-          else
-            Navigator.closePage(pageId)
-          end
-        end
+        end)
       end
 
       if controls.continue then
-        controls.continue.EventHandler = function(control)
-          if isRisingEdge(control) then
+        forEachControl(controls.continue, function(continueControl)
+          continueControl.EventHandler = function()
             if shouldLog("controls") then log("controls", "continue pressed") end
             requestAccess(Navigator.Access.DEFAULT)
           end
-        end
+        end)
       end
 
       if controls.openKeypad then
-        controls.openKeypad.EventHandler = function(control)
-          if isRisingEdge(control) then
+        forEachControl(controls.openKeypad, function(openKeypadControl)
+          openKeypadControl.EventHandler = function()
             if shouldLog("controls") then log("controls", "open keypad pressed") end
             showKeypad()
           end
-        end
+        end)
       end
 
       if controls.closeKeypad then
-        controls.closeKeypad.EventHandler = function(control)
-          if isRisingEdge(control) then
+        forEachControl(controls.closeKeypad, function(closeKeypadControl)
+          closeKeypadControl.EventHandler = function()
             if shouldLog("controls") then log("controls", "close keypad pressed") end
             closeKeypad()
           end
-        end
+        end)
       end
     end
   end
@@ -1036,21 +1067,21 @@ local function bindControls()
   local historyControls = config.historyControls
   if historyControls then
     if historyControls.back then
-      historyControls.back.EventHandler = function(control)
-        if isRisingEdge(control) then
+      forEachControl(historyControls.back, function(backControl)
+        backControl.EventHandler = function()
           if shouldLog("controls") then log("controls", "history back pressed") end
           Navigator.back()
         end
-      end
+      end)
     end
 
     if historyControls.forward then
-      historyControls.forward.EventHandler = function(control)
-        if isRisingEdge(control) then
+      forEachControl(historyControls.forward, function(forwardControl)
+        forwardControl.EventHandler = function()
           if shouldLog("controls") then log("controls", "history forward pressed") end
           Navigator.forward()
         end
-      end
+      end)
     end
 
     updateHistoryControls()

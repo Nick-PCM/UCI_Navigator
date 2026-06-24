@@ -6,7 +6,6 @@
 
 Navigator.configure({
   uci = {
-    name = "My UCI",
     -- pageName defaults to "Main".
     -- transition defaults to "none".
   },
@@ -79,15 +78,15 @@ Navigator.configure({
 
     home = {
       controls = {
-        open = Controls["Home Nav"],
+        open = Controls["Home_Nav"],
       },
       views = { default = { "Home Page" } },
     },
 
     audio = {
       controls = {
-        open = Controls["Audio Nav"],
-        close = Controls["Audio Back"],
+        open = Controls["Audio_Nav"],
+        close = Controls["Audio_Back"],
       },
       views = { default = { "Audio Page" } },
       defaultChildId = "volume",
@@ -96,8 +95,8 @@ Navigator.configure({
     volume = {
       parentId = "audio",
       controls = {
-        open = Controls["Open Volume"],
-        close = Controls["Volume Back"],
+        open = Controls["Open_Volume"],
+        close = Controls["Volume_Back"],
       },
       views = { default = { "Volume Page" } },
     },
