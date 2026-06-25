@@ -1,26 +1,13 @@
 -- authoringExample.lua
 -- Proposed flat group authoring style based on Examples/Basic Keypad Example.lua.
 --
--- This is a design sketch, not runtime-supported Navigator syntax yet.
--- The intent is that Navigator.compile(...) would expand each group(...) block
--- into the current pageGroups/pages/access shape, then Navigator.apply(...)
--- would install that compiled config.
+-- Navigator.compile(...) expands each group(...) block into Navigator's runtime
+-- pageGroups/pages/access shape, then Navigator.apply(...) installs it.
 --
 -- This version removes Page/Group suffixes from authored IDs.
 --
--- Suggested Navigator work:
--- - Add first-class regions: flat presentation targets with owner-scoped
---   lifetime and default content.
--- - Navigator.compile should compile page.content and region fills into the
---   current views/frame override runtime behavior.
--- - Navigator.compile should provide typed reference registries:
---   pages.*, groups.*, and regions.*.
--- - Navigator.compile should provide interlocked/independent mode sentinels
---   and compile them to the current group behavior strings.
--- - Navigator.compile should resolve control-name strings in control tables
---   such as page.controls/accessControls through Controls[controlName].
--- - Navigator can initially map regions to the current frameRoles internals,
---   but the public API/docs should eventually use regions instead of frameRoles.
+-- Navigator.compile provides typed reference registries, mode sentinels,
+-- control-name resolution, and first-class owner-scoped regions.
 
 local Navigator = require("Navigator") -- omit from Q-SYS script; useful for editor comments.
 
@@ -58,7 +45,7 @@ local config = Navigator.compile({
 
   gate = group({ owner = groups.root, mode = independent }),
 
-  access = group({ owner = groups.gate, mode = interlocked, startAt = pages.splash },
+  accessGate = group({ owner = groups.gate, mode = interlocked, startAt = pages.splash },
     {
       splash = page({ content = { locked = "Splash" } }),
       keypad = page({ content = { locked = "Keypad" }, controls = { open = "Open Keypad", close = "Close Keypad",},}),
@@ -89,7 +76,7 @@ local config = Navigator.compile({
     }
   ),
 
-  audio = group({ owner = pages.audio, mode = interlocked, parentVisible = true, startAt = pages.audioRouting },
+  audioSubpages = group({ owner = pages.audio, mode = interlocked, parentVisible = true, startAt = pages.audioRouting },
     {
       audioRouting = page({ content = "Audio Routing", controls = { open = "Open Audio Routing" } }),
       audioSettings = page({
@@ -102,7 +89,7 @@ local config = Navigator.compile({
     }
   ),
 
-  video = group({ owner = pages.video, mode = interlocked, parentVisible = true, startAt = pages.videoRouting },
+  videoSubpages = group({ owner = pages.video, mode = interlocked, parentVisible = true, startAt = pages.videoRouting },
     {
       videoRouting = page({ content = "Video Routing", controls = { open = "Open Video Routing", close = "Close Video Routing" } }),
       videoSettings = page({ content = "Video Settings", controls = { open = "Open Video Settings", close = "Close Video Settings" } }),

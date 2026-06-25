@@ -5,7 +5,7 @@
 -- an advanced access level with overlay, replacement, fallback, and
 -- advanced-only page examples.
 
-Navigator.configure({
+Navigator.apply({
   -- Q-SYS UCI target for layer visibility changes.
   uci = {
     pageName = "Main", -- Q-SYS UCI page that contains the controlled layers.

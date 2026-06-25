@@ -4,7 +4,7 @@
 -- This example mirrors Basic Keypad Example.lua, but locked access does not use a
 -- keypad. Pressing the access request control while locked opens default access.
 
-Navigator.configure({
+Navigator.apply({
   -- Q-SYS UCI target for layer visibility changes.
   uci = {
     pageName = "Main", -- Q-SYS UCI page that contains the controlled layers.

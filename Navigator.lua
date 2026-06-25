@@ -19,8 +19,14 @@ Navigator.OwnerVisibility = { -- page-owned group owner view policy
 }
 
 local ROOT_OWNER = "root" -- implicit top-level interlocked owner
-local LOCKED_GROUP = "lockedGroup" -- required group for locked pages
-local UNLOCKED_GROUP = "unlockedGroup" -- required group for unlocked pages
+local DEFAULT_ACCESS = Navigator.Access.DEFAULT
+
+local MARKER_GROUP = "navigator.group"
+local MARKER_PAGE = "navigator.page"
+local MARKER_REGION = "navigator.region"
+local MARKER_REF = "navigator.ref"
+local MARKER_REGION_FILL = "navigator.regionFill"
+local MARKER_MODE = "navigator.mode"
 
 local config -- validated project configuration
 local state = {
@@ -37,6 +43,85 @@ local historyForward = {} -- forward navigation snapshot stack
 local accessStateControl -- Q-SYS control mirroring active access
 local logging = {} -- enabled log categories
 local anyLoggingEnabled = false -- fast skip when all logging is off
+
+local function marker(kind, fields)
+  fields = fields or {}
+  fields.__navigatorMarker = kind
+  return fields
+end
+
+local function isMarker(value, kind)
+  return type(value) == "table" and value.__navigatorMarker == kind
+end
+
+local function makeRef(kind, id)
+  local ref = marker(MARKER_REF, { kind = kind, id = id })
+  if kind == "region" then
+    return setmetatable(ref, {
+      __call = function(regionRef, content)
+        return marker(MARKER_REGION_FILL, {
+          region = regionRef,
+          content = content,
+        })
+      end,
+    })
+  end
+  return ref
+end
+
+local function makeRegistry(kind, builtIns)
+  return setmetatable({}, {
+    __index = function(_, id)
+      if builtIns and builtIns[id] then return builtIns[id] end
+      return makeRef(kind, id)
+    end,
+    __newindex = function()
+      error(kind .. " references are read-only")
+    end,
+  })
+end
+
+local groupsRegistry = makeRegistry("group", {
+  root = makeRef("group", ROOT_OWNER),
+})
+local pagesRegistry = makeRegistry("page")
+local regionsRegistry = makeRegistry("region")
+
+local interlockedMode = marker(MARKER_MODE, {
+  value = Navigator.GroupBehavior.INTERLOCKED,
+})
+local independentMode = marker(MARKER_MODE, {
+  value = Navigator.GroupBehavior.INDEPENDENT,
+})
+
+function Navigator.group(spec, pages)
+  return marker(MARKER_GROUP, { spec = spec or {}, pages = pages or {} })
+end
+
+function Navigator.page(spec)
+  return marker(MARKER_PAGE, { spec = spec or {} })
+end
+
+function Navigator.region(spec)
+  return marker(MARKER_REGION, { spec = spec or {} })
+end
+
+Navigator.groups = groupsRegistry
+Navigator.pages = pagesRegistry
+Navigator.regions = regionsRegistry
+Navigator.interlocked = interlockedMode
+Navigator.independent = independentMode
+
+if _G then
+  rawset(_G, "group", rawget(_G, "group") or Navigator.group)
+  rawset(_G, "page", rawget(_G, "page") or Navigator.page)
+  rawset(_G, "region", rawget(_G, "region") or Navigator.region)
+  rawset(_G, "groups", rawget(_G, "groups") or groupsRegistry)
+  rawset(_G, "pages", rawget(_G, "pages") or pagesRegistry)
+  rawset(_G, "regions", rawget(_G, "regions") or regionsRegistry)
+  rawset(_G, "interlocked", rawget(_G, "interlocked") or interlockedMode)
+  rawset(_G, "independent", rawget(_G, "independent") or independentMode)
+end
 
 -- Copies a set-like table so callers cannot mutate navigator state by reference.
 local function copyTable(source)
@@ -118,7 +203,8 @@ end
 
 -- Identifies pages that should resolve locked views regardless of active access.
 local function pageIsInLockedGroup(pageId)
-  return groupIsUnder(indexes.pageGroupByPageId[pageId], LOCKED_GROUP)
+  return groupIsUnder(indexes.pageGroupByPageId[pageId],
+    config.access.lockedGroupId)
 end
 
 -- Chooses the access level a page should use for its view lookup.
@@ -130,13 +216,13 @@ end
 -- Resolves a page view with default fallback for unlocked access levels.
 local function viewForAccess(page, access)
   return page.views[access]
-    or (not isLockedAccess(access) and page.views[Navigator.Access.DEFAULT])
+    or (not isLockedAccess(access) and page.views[config.access.defaultLevelId])
 end
 
 -- Resolves an access-keyed layer table, used by frame overrides.
 local function viewTableForAccess(views, access)
   return views[access]
-    or (not isLockedAccess(access) and views[Navigator.Access.DEFAULT])
+    or (not isLockedAccess(access) and views[config.access.defaultLevelId])
 end
 
 -- Resolves the concrete layer list for a page in the current or supplied access.
@@ -166,9 +252,19 @@ end
 -- Collects every declared layer so first reconciliation can hide stale layers.
 local function collectConfiguredLayers()
   local layers = {}
+  for _, region in pairs(config.regions or {}) do
+    for _, layerNames in pairs(region.views) do
+      addLayers(layers, layerNames)
+    end
+  end
   for _, page in pairs(config.pages) do
     for _, layerNames in pairs(page.views) do
       addLayers(layers, layerNames)
+    end
+    for _, regionViews in pairs(page.regionFills or {}) do
+      for _, layerNames in pairs(regionViews) do
+        addLayers(layers, layerNames)
+      end
     end
     for _, roleViews in pairs(page.frameOverrides or {}) do
       for _, layerNames in pairs(roleViews) do
@@ -200,6 +296,19 @@ local function hiddenOwnerPageIds()
   return hidden
 end
 
+local function ownerIsActive(ownerId)
+  if ownerId == ROOT_OWNER then return true end
+  return state.activeGroupIds[ownerId] == true
+    or state.activePageIds[ownerId] == true
+end
+
+local function accessForOwner(ownerId)
+  if indexes.pagesById[ownerId] then
+    return effectiveAccessForPage(ownerId)
+  end
+  return state.access
+end
+
 -- Selects the active frame override for each role, preferring deeper pages.
 local function selectedFrameOverrides()
   local selected = {}
@@ -225,11 +334,40 @@ local function selectedFrameOverrides()
   return selected
 end
 
+-- Selects the active fill for each region, preferring deeper pages.
+local function selectedRegionFills()
+  local selected = {}
+  for pageId in pairs(state.activePageIds) do
+    local page = config.pages[pageId]
+    for regionId, regionViews in pairs(page.regionFills or {}) do
+      local region = config.regions and config.regions[regionId]
+      if region and ownerIsActive(region.owner) then
+        local view = viewTableForAccess(regionViews, effectiveAccessForPage(pageId))
+        if view then
+          local depth = pageDepth(pageId)
+          local current = selected[regionId]
+          assert(not current or current.depth ~= depth,
+            "multiple active region fills for " .. regionId)
+          if not current or depth > current.depth then
+            selected[regionId] = {
+              pageId = pageId,
+              depth = depth,
+              view = view,
+            }
+          end
+        end
+      end
+    end
+  end
+  return selected
+end
+
 -- Converts active navigator state into the full desired layer set.
 local function resolveDesiredLayers()
   local desired = {}
   local hidden = hiddenOwnerPageIds()
   local frameOverrides = selectedFrameOverrides()
+  local regionFills = selectedRegionFills()
   local hiddenFramePageIds = {}
 
   for role in pairs(frameOverrides) do
@@ -246,6 +384,17 @@ local function resolveDesiredLayers()
   end
   for _, override in pairs(frameOverrides) do
     addLayers(desired, override.view)
+  end
+  for regionId, region in pairs(config.regions or {}) do
+    if ownerIsActive(region.owner) then
+      local fill = regionFills[regionId]
+      if fill then
+        addLayers(desired, fill.view)
+      else
+        addLayers(desired,
+          viewTableForAccess(region.views, accessForOwner(region.owner)))
+      end
+    end
   end
   return desired
 end
@@ -618,12 +767,12 @@ local function accessHomePageId(access)
   if isLockedAccess(access) then
     return config.access.levels[Navigator.Access.LOCKED].homePageId
   end
-  return config.access.levels[Navigator.Access.DEFAULT].homePageId
+  return config.access.levels[config.access.defaultLevelId].homePageId
 end
 
 -- Moves the navigator across access boundaries and resets state as needed.
 function Navigator.setAccess(targetAccess)
-  assert(config, "configure Navigator before changing access")
+  assert(config, "apply Navigator before changing access")
   assert(type(targetAccess) == "string" and config.access.levels[targetAccess],
     "invalid access level")
 
@@ -647,7 +796,7 @@ function Navigator.setAccess(targetAccess)
   else
     state.access = targetAccess
     closeUnavailablePages(targetAccess)
-    if not state.activeGroupIds[UNLOCKED_GROUP] then
+    if not state.activeGroupIds[config.access.unlockedGroupId] then
       activatePage(accessHomePageId(targetAccess))
     end
   end
@@ -660,19 +809,36 @@ end
 
 -- Public API for opening a page and recording history.
 function Navigator.openPage(pageId)
-  assert(config, "configure Navigator before navigating")
+  assert(config, "apply Navigator before navigating")
   openPageInternal(pageId, true)
 end
 
 -- Public API for closing a page and recording history.
 function Navigator.closePage(pageId)
-  assert(config, "configure Navigator before navigating")
+  assert(config, "apply Navigator before navigating")
   closePageInternal(pageId, true)
+end
+
+local function pageIdFromHandle(pageOrId)
+  if type(pageOrId) == "table" then
+    assert(type(pageOrId.id) == "string" and pageOrId.id ~= "",
+      "page handle must include an id")
+    return pageOrId.id
+  end
+  return pageOrId
+end
+
+function Navigator.open(pageOrId)
+  Navigator.openPage(pageIdFromHandle(pageOrId))
+end
+
+function Navigator.close(pageOrId)
+  Navigator.closePage(pageIdFromHandle(pageOrId))
 end
 
 -- Restores the previous page/group snapshot from navigation history.
 function Navigator.back()
-  assert(config, "configure Navigator before navigating")
+  assert(config, "apply Navigator before navigating")
   if #historyBack == 0 then
     updateHistoryControls()
     return
@@ -689,7 +855,7 @@ end
 
 -- Restores the next page/group snapshot after a back operation.
 function Navigator.forward()
-  assert(config, "configure Navigator before navigating")
+  assert(config, "apply Navigator before navigating")
   if #historyForward == 0 then
     updateHistoryControls()
     return
@@ -778,9 +944,22 @@ end
 
 -- Normalizes page authoring aliases before validation and indexing.
 local function normalizeConfig(candidate)
+  candidate.uci = candidate.uci or {}
   candidate.uci.transition = candidate.uci.transition or "none"
+  candidate.regions = candidate.regions or {}
+  for regionId, region in pairs(candidate.regions) do
+    region.views = normalizeViews(regionId, region.views)
+  end
   for pageId, page in pairs(candidate.pages) do
     page.views = normalizeViews(pageId, page.views)
+    if page.regionFills then
+      assert(type(page.regionFills) == "table",
+        pageId .. ".regionFills must be a table")
+      for regionId, regionViews in pairs(page.regionFills) do
+        page.regionFills[regionId] =
+          normalizeViews(pageId .. ".regionFills." .. regionId, regionViews)
+      end
+    end
     if page.overrides ~= nil then
       assert(page.frameOverrides == nil,
         pageId .. " cannot define both overrides and frameOverrides")
@@ -859,11 +1038,45 @@ local function validateFrameOverrides(pageId, frameOverrides, levels, frameRoles
   end
 end
 
+-- Validates first-class region defaults and ownership.
+local function validateRegions(candidate)
+  assert(type(candidate.regions) == "table", "regions must be a table")
+  for regionId, region in pairs(candidate.regions) do
+    assert(type(regionId) == "string" and regionId ~= "",
+      "region IDs must be strings")
+    assert(not candidate.pages[regionId] and not candidate.pageGroups[regionId],
+      regionId .. " is used by more than one page, group, or region")
+    assert(type(region) == "table",
+      regionId .. " region definition must be a table")
+    assert(type(region.owner) == "string" and region.owner ~= "",
+      regionId .. " requires owner")
+    assert(region.owner == ROOT_OWNER
+        or candidate.pageGroups[region.owner]
+        or candidate.pages[region.owner],
+      regionId .. " has an unknown owner")
+    validateViews(regionId, region.views, candidate.access.levels)
+  end
+end
+
+-- Validates per-page fills for first-class regions.
+local function validateRegionFills(pageId, regionFills, levels, regions)
+  if regionFills == nil then return end
+  assert(type(regionFills) == "table", pageId .. ".regionFills must be a table")
+  for regionId, regionViews in pairs(regionFills) do
+    assert(regions[regionId],
+      pageId .. ".regionFills has unknown region " .. tostring(regionId))
+    validateViews(pageId .. ".regionFills." .. regionId, regionViews, levels)
+  end
+end
+
 -- Validates access levels, keypad requirements, and timeout settings.
 local function validateAccess(access)
   assert(type(access) == "table", "access must be a table")
   assert(type(access.levels) == "table", "access.levels must be a table")
-  for _, level in ipairs({ Navigator.Access.LOCKED, Navigator.Access.DEFAULT }) do
+  access.defaultLevelId = access.defaultLevelId or Navigator.Access.DEFAULT
+  assert(access.defaultLevelId ~= Navigator.Access.LOCKED,
+    "locked access cannot be the default access level")
+  for _, level in ipairs({ Navigator.Access.LOCKED, access.defaultLevelId }) do
     local definition = access.levels[level]
     assert(type(definition) == "table", "access.levels." .. level .. " is required")
     assert(type(definition.homePageId) == "string"
@@ -875,7 +1088,7 @@ local function validateAccess(access)
     assert(type(definition) == "table",
       "access.levels." .. level .. " must be a table")
     if level ~= Navigator.Access.LOCKED
-        and level ~= Navigator.Access.DEFAULT then
+        and level ~= access.defaultLevelId then
       assert(definition.homePageId == nil,
         "custom access levels do not define homePageId")
       for key in pairs(definition) do
@@ -923,10 +1136,14 @@ local function buildIndexes(candidate)
     assert(groupId ~= ROOT_OWNER, "root is reserved")
     assert(not candidate.pages[groupId],
       groupId .. " is both a page id and a group id")
+    assert(not candidate.regions or not candidate.regions[groupId],
+      groupId .. " is used by more than one page, group, or region")
     indexes.groupsById[groupId] = group
   end
   for pageId, page in pairs(candidate.pages) do
     assert(pageId ~= ROOT_OWNER, "root is reserved")
+    assert(not candidate.regions or not candidate.regions[pageId],
+      pageId .. " is used by more than one page, group, or region")
     indexes.pagesById[pageId] = page
     indexes.pageGroupByPageId[pageId] = page.pageGroup
     indexes.pagesByGroupId[page.pageGroup] =
@@ -992,8 +1209,6 @@ local function validateConfig(candidate)
 
   validateAccess(candidate.access)
   validateFrameRoles(candidate)
-  assert(candidate.pageGroups[LOCKED_GROUP], "lockedGroup is required")
-  assert(candidate.pageGroups[UNLOCKED_GROUP], "unlockedGroup is required")
 
   for pageId, page in pairs(candidate.pages) do
     assert(type(pageId) == "string" and pageId ~= "", "page IDs must be strings")
@@ -1010,6 +1225,8 @@ local function validateConfig(candidate)
     assert(candidate.pageGroups[page.pageGroup],
       pageId .. " has unknown pageGroup " .. tostring(page.pageGroup))
     validateViews(pageId, page.views, candidate.access.levels)
+    validateRegionFills(pageId, page.regionFills,
+      candidate.access.levels, candidate.regions)
     validateFrameOverrides(pageId, page.frameOverrides,
       candidate.access.levels, candidate.frameRoles)
     if page.controls then
@@ -1018,6 +1235,7 @@ local function validateConfig(candidate)
   end
 
   buildIndexes(candidate)
+  validateRegions(candidate)
 
   for groupId, group in pairs(candidate.pageGroups) do
     assert(type(groupId) == "string" and groupId ~= "",
@@ -1054,21 +1272,28 @@ local function validateConfig(candidate)
   end
 
   local lockedHome = candidate.access.levels[Navigator.Access.LOCKED].homePageId
-  local defaultHome = candidate.access.levels[Navigator.Access.DEFAULT].homePageId
+  local defaultHome =
+    candidate.access.levels[candidate.access.defaultLevelId].homePageId
   assert(candidate.pages[lockedHome], "locked home page is missing")
   assert(candidate.pages[defaultHome], "default home page is missing")
-  assert(groupIsUnder(candidate.pages[lockedHome].pageGroup, LOCKED_GROUP),
-    "locked home page must be in lockedGroup")
-  assert(groupIsUnder(candidate.pages[defaultHome].pageGroup, UNLOCKED_GROUP),
-    "default home page must be under unlockedGroup")
+  candidate.access.lockedGroupId =
+    candidate.access.lockedGroupId or candidate.pages[lockedHome].pageGroup
+  candidate.access.unlockedGroupId =
+    candidate.access.unlockedGroupId or candidate.pages[defaultHome].pageGroup
+  assert(groupIsUnder(candidate.pages[lockedHome].pageGroup,
+      candidate.access.lockedGroupId),
+    "locked home page must be under access.lockedGroupId")
+  assert(groupIsUnder(candidate.pages[defaultHome].pageGroup,
+      candidate.access.unlockedGroupId),
+    "default home page must be under access.unlockedGroupId")
   assert(candidate.pages[lockedHome].views[Navigator.Access.LOCKED],
     "locked home page requires locked view")
 
   if candidate.access.keypadRequired then
     local keypadPage = candidate.pages[candidate.access.keypadPageId]
     assert(keypadPage, "access.keypadPageId does not identify a page")
-    assert(groupIsUnder(keypadPage.pageGroup, LOCKED_GROUP),
-      "keypad page must be in lockedGroup")
+    assert(groupIsUnder(keypadPage.pageGroup, candidate.access.lockedGroupId),
+      "keypad page must be under access.lockedGroupId")
     assert(keypadPage.views[Navigator.Access.LOCKED],
       "keypad page requires locked view")
   end
@@ -1097,6 +1322,279 @@ local function validateConfig(candidate)
       assert(type(enabled) == "boolean", "logging." .. key .. " must be boolean")
     end
   end
+end
+
+local function clonePlainTable(source, skip)
+  local result = {}
+  for key, value in pairs(source or {}) do
+    if not skip or not skip[key] then result[key] = value end
+  end
+  return result
+end
+
+local function refId(value, expectedKind, context)
+  assert(isMarker(value, MARKER_REF),
+    context .. " must be a " .. expectedKind .. " reference")
+  assert(value.kind == expectedKind,
+    context .. " must be a " .. expectedKind .. " reference")
+  return value.id
+end
+
+local function resolveOwnerRef(value, context)
+  assert(isMarker(value, MARKER_REF),
+    context .. " must be a group or page reference")
+  assert(value.kind == "group" or value.kind == "page",
+    context .. " must be a group or page reference")
+  return value.id
+end
+
+local function resolvePageRef(value, context)
+  return refId(value, "page", context)
+end
+
+local function compileControl(ownerId, value)
+  if type(value) == "string" then
+    assert(type(Controls) == "table",
+      ownerId .. " control " .. value .. " requires Controls")
+    local control = Controls[value]
+    assert(control ~= nil, ownerId .. " references missing control " .. value)
+    return control
+  end
+  if isControlList(value) then
+    local result = {}
+    for index, item in ipairs(value) do
+      result[index] = compileControl(ownerId .. "[" .. index .. "]", item)
+    end
+    return result
+  end
+  return value
+end
+
+local function compileControls(ownerId, controls, allowedKeys)
+  if controls == nil then return nil end
+  assert(type(controls) == "table", ownerId .. " controls must be a table")
+  local compiled = {}
+  for key, value in pairs(controls) do
+    assert(allowedKeys[key], ownerId .. "." .. tostring(key)
+      .. " is not a supported control")
+    compiled[key] = compileControl(ownerId .. "." .. key, value)
+  end
+  return compiled
+end
+
+local function addContentItem(ownerId, access, item, views, fills)
+  if type(item) == "string" then
+    views[access] = views[access] or {}
+    views[access][#views[access] + 1] = item
+    return
+  end
+  if isMarker(item, MARKER_REGION_FILL) then
+    local regionId = refId(item.region, "region", ownerId .. " region fill")
+    fills[regionId] = fills[regionId] or {}
+    assert(fills[regionId][access] == nil,
+      ownerId .. " fills region " .. regionId .. " more than once for " .. access)
+    local fillViews = {}
+    local fillFills = {}
+    local normalized = item.content
+    if type(normalized) == "string" then normalized = { normalized } end
+    assert(type(normalized) == "table" and normalized[1] ~= nil,
+      ownerId .. " region fill content must be a layer name or layer list")
+    for _, fillItem in ipairs(normalized) do
+      assert(type(fillItem) == "string",
+        ownerId .. " region fill content must contain only layer names")
+      addContentItem(ownerId, access, fillItem, fillViews, fillFills)
+    end
+    fills[regionId][access] = fillViews[access]
+    return
+  end
+  error(ownerId .. " content contains an unsupported item")
+end
+
+local function compileContent(ownerId, content, defaultAccess)
+  local views = {}
+  local fills = {}
+  if type(content) == "string" or isMarker(content, MARKER_REGION_FILL) then
+    addContentItem(ownerId, defaultAccess, content, views, fills)
+  else
+    assert(type(content) == "table", ownerId .. " requires content")
+    if content[1] ~= nil then
+      for _, item in ipairs(content) do
+        addContentItem(ownerId, defaultAccess, item, views, fills)
+      end
+    else
+      for access, accessContent in pairs(content) do
+        validateAccessName(ownerId, access)
+        if type(accessContent) == "string"
+            or isMarker(accessContent, MARKER_REGION_FILL) then
+          addContentItem(ownerId, access, accessContent, views, fills)
+        else
+          assert(type(accessContent) == "table",
+            ownerId .. "." .. access .. " content must be a layer or layer list")
+          for _, item in ipairs(accessContent) do
+            addContentItem(ownerId, access, item, views, fills)
+          end
+        end
+      end
+    end
+  end
+  return views, fills
+end
+
+local function compileAccess(authored)
+  assert(type(authored) == "table", "access must be a table")
+  local compiled = {
+    levels = {},
+    keypadRequired = false,
+    sessionTimeoutSeconds = 0,
+  }
+  for accessId, definition in pairs(authored) do
+    assert(type(accessId) == "string" and accessId ~= "",
+      "access IDs must be strings")
+    validateAccessName("access", accessId)
+    assert(type(definition) == "table",
+      "access." .. accessId .. " must be a table")
+    local level = {}
+    if definition.startAt then
+      level.homePageId = resolvePageRef(definition.startAt,
+        "access." .. accessId .. ".startAt")
+    end
+    compiled.levels[accessId] = level
+    if definition.default == true then
+      assert(compiled.defaultLevelId == nil,
+        "only one access level can be default")
+      compiled.defaultLevelId = accessId
+    end
+    if definition.keypad then
+      assert(accessId == Navigator.Access.LOCKED,
+        "only locked access can define keypad")
+      compiled.keypadRequired = true
+      compiled.keypadPageId = resolvePageRef(definition.keypad,
+        "access." .. accessId .. ".keypad")
+    end
+    if definition.pinEntryTimeoutSeconds ~= nil then
+      compiled.pinEntryTimeoutSeconds = definition.pinEntryTimeoutSeconds
+    end
+    if definition.sessionTimeoutSeconds ~= nil then
+      compiled.sessionTimeoutSeconds = definition.sessionTimeoutSeconds
+    end
+  end
+  compiled.defaultLevelId = compiled.defaultLevelId or DEFAULT_ACCESS
+  if compiled.keypadRequired and compiled.pinEntryTimeoutSeconds == nil then
+    compiled.pinEntryTimeoutSeconds = 0
+  end
+  return compiled
+end
+
+local function compileGroupSpec(groupId, spec)
+  assert(type(spec) == "table", groupId .. " group spec must be a table")
+  local mode = spec.mode
+  assert(isMarker(mode, MARKER_MODE), groupId .. " has invalid group mode")
+  local compiled = {
+    owner = resolveOwnerRef(spec.owner, groupId .. ".owner"),
+    behavior = mode.value,
+  }
+  if spec.startAt then
+    compiled.defaultPageIds = {
+      resolvePageRef(spec.startAt, groupId .. ".startAt"),
+    }
+  end
+  if spec.parentVisible ~= nil then
+    assert(type(spec.parentVisible) == "boolean",
+      groupId .. ".parentVisible must be boolean")
+    compiled.ownerVisibility = spec.parentVisible
+      and Navigator.OwnerVisibility.VISIBLE
+      or Navigator.OwnerVisibility.HIDDEN
+  end
+  return compiled
+end
+
+local function compilePage(pageId, pageMarker, groupId, defaultAccess)
+  local spec = pageMarker.spec
+  assert(type(spec) == "table", pageId .. " page spec must be a table")
+  local views, fills = compileContent(pageId, spec.content, defaultAccess)
+  local compiled = clonePlainTable(spec, {
+    content = true,
+    controls = true,
+  })
+  compiled.id = pageId
+  compiled.pageGroup = groupId
+  compiled.views = views
+  if next(fills) then compiled.regionFills = fills end
+  compiled.controls = compileControls(pageId .. ".controls",
+    spec.controls, pageControlKeys)
+  return compiled
+end
+
+local function compileRegion(regionId, regionMarker, defaultAccess)
+  local spec = regionMarker.spec
+  assert(type(spec) == "table", regionId .. " region spec must be a table")
+  local views, fills = compileContent(regionId, spec.content, defaultAccess)
+  assert(next(fills) == nil, regionId .. " region content cannot fill regions")
+  local compiled = clonePlainTable(spec, {
+    content = true,
+    owner = true,
+  })
+  compiled.id = regionId
+  compiled.owner = resolveOwnerRef(spec.owner, regionId .. ".owner")
+  compiled.views = views
+  return compiled
+end
+
+function Navigator.compile(project)
+  assert(type(project) == "table", "compile requires a project table")
+  local access = compileAccess(project.access or {})
+  local defaultAccess = access.defaultLevelId
+  local compiled = {
+    uci = clonePlainTable(project.uci or {}),
+    logging = project.logging,
+    access = access,
+    accessControls = compileControls("accessControls",
+      project.accessControls, accessControlKeys),
+    historyControls = compileControls("historyControls",
+      project.historyControls, historyControlKeys),
+    historyMaxEntries = project.historyMaxEntries,
+    pageGroups = {},
+    pages = {},
+    regions = {},
+  }
+
+  for key, value in pairs(project) do
+    if isMarker(value, MARKER_GROUP) then
+      assert(type(key) == "string" and key ~= "", "group IDs must be strings")
+      assert(compiled.pageGroups[key] == nil, "duplicate group ID " .. key)
+      compiled.pageGroups[key] = compileGroupSpec(key, value.spec)
+      compiled.pageGroups[key].id = key
+    end
+  end
+
+  for groupId, groupMarker in pairs(project) do
+    if isMarker(groupMarker, MARKER_GROUP) then
+      for pageId, pageMarker in pairs(groupMarker.pages or {}) do
+        assert(isMarker(pageMarker, MARKER_PAGE),
+          groupId .. "." .. tostring(pageId) .. " must be page(...)")
+        assert(compiled.pages[pageId] == nil,
+          "duplicate page ID " .. tostring(pageId))
+        compiled.pages[pageId] =
+          compilePage(pageId, pageMarker, groupId, defaultAccess)
+      end
+    end
+  end
+
+  if project.regions ~= nil then
+    assert(type(project.regions) == "table", "regions must be a table")
+    for regionId, regionMarker in pairs(project.regions) do
+      assert(isMarker(regionMarker, MARKER_REGION),
+        "regions." .. tostring(regionId) .. " must be region(...)")
+      assert(compiled.regions[regionId] == nil,
+        "duplicate region ID " .. tostring(regionId))
+      compiled.regions[regionId] =
+        compileRegion(regionId, regionMarker, defaultAccess)
+    end
+  end
+
+  validateConfig(compiled)
+  compiled.groups = compiled.pageGroups
+  return compiled
 end
 
 -- Caches logging settings so disabled logging is cheap at runtime.
@@ -1137,9 +1635,9 @@ local function bindControls()
         if isLockedAccess(state.access) and config.access.keypadRequired then
           Navigator.openPage(config.access.keypadPageId)
         elseif isLockedAccess(state.access) then
-          requestAccess(Navigator.Access.DEFAULT)
+          requestAccess(config.access.defaultLevelId)
         elseif not isLockedAccess(state.access) then
-          requestAccess(Navigator.Access.DEFAULT)
+          requestAccess(config.access.defaultLevelId)
         end
       end
     end)
@@ -1197,15 +1695,21 @@ local function bindControls()
 end
 
 -- Initializes Navigator with a validated project model and locked home state.
-function Navigator.configure(projectConfig)
-  assert(not config, "Navigator may be configured only once")
-  assert(type(projectConfig) == "table", "configure requires a config table")
+function Navigator.apply(projectConfig)
+  assert(not config, "Navigator may be applied only once")
+  assert(type(projectConfig) == "table", "apply requires a config table")
   validateConfig(projectConfig)
   config = projectConfig
+  config.groups = config.pageGroups
   configureLogging()
   state.access = Navigator.Access.LOCKED
   state.activePageIds = {}
   state.activeGroupIds = {}
+  visibleLayers = {}
+  visibilityInitialized = false
+  historyBack = {}
+  historyForward = {}
+  accessStateControl = nil
   activatePage(accessHomePageId(Navigator.Access.LOCKED))
   updatePageOpenControls()
   reconcileVisibility()

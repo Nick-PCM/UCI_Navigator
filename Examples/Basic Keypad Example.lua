@@ -46,7 +46,7 @@ root
 
 local Navigator = require("Navigator") -- ommit from qsys script. just here to allow comments in vscode
 
-Navigator.configure({
+Navigator.apply({
   -- Q-SYS UCI target for layer visibility changes.
   uci = {
     pageName = "Main", -- Q-SYS UCI page that contains the controlled layers.
