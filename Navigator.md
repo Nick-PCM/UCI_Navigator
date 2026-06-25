@@ -19,7 +19,7 @@ Navigator runtime state is built from:
 - `groups`: lifecycle containers with an owner and behavior.
 - `pages`: visible navigable states with layer views, controls, and optional region fills.
 - `regions`: owner-scoped presentation areas with default layer views.
-- `access`: locked, user, and admin access behavior.
+- `access`: locked access, one configured default access level, and optional custom access behavior.
 
 A page belongs to exactly one group. A group is owned by `root`, another group, or a page. A region is owned by `root`, a group, or a page.
 
@@ -70,7 +70,7 @@ Rules:
 - `locked` is required.
 - One unlocked level should set `default = true`.
 - Locked access does not fall back to default content.
-- `admin` falls back to `user` when a page or region does not define admin content.
+- Custom unlocked access levels fall back to the level marked `default = true` when a page or region does not define matching content.
 - `keypad`, when present, must reference a locked page.
 - Access changes clear history.
 

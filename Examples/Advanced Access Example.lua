@@ -3,31 +3,39 @@
 --
 -- Demonstrates authored custom access content, fallback, and region fills.
 
+local Navigator = require("Navigator")
+
+-- Compile the user-friendly authored project into Navigator runtime config.
 local config = Navigator.compile({
-  uci = {
-    pageName = "Main",
-  },
+  uci = { pageName = "Main" },
 
+  -- Define access levels and entry pages.
   access = {
-    locked = { startAt = pages.splash, keypad = pages.keypad, pinEntryTimeoutSeconds = 30 },
-    user = { startAt = pages.home, sessionTimeoutSeconds = 600, default = true },
-    admin = {},
+    locked = { startAt = pages.splash, keypad = pages.keypad, pinEntryTimeoutSeconds = 30 }, -- locked entry and keypad timeout
+    user = { startAt = pages.home, sessionTimeoutSeconds = 600, default = true }, -- default unlocked access
+    admin = {}, -- elevated access with admin-specific content
   },
 
+  -- Bind global Q-SYS controls for access behavior.
   accessControls = {
-    state = "Access State",
-    request = "Access Request",
-    lock = "Lock Request",
-    activityPulse = "Activity Pulse",
+    state = "Access State", -- external access state bridge
+    request = "Access Request", -- request unlock or open keypad
+    lock = "Lock Request", -- return to locked access
+    activityPulse = "Activity Pulse", -- restart active timers
   },
 
+  -- Bind optional Q-SYS controls for navigation history.
   historyControls = {
-    back = "Back",
-    forward = "Forward",
+    back = "Back", -- navigate to previous state
+    forward = "Forward", -- navigate to next state
   },
 
+  -- groups.root is the built-in interlocked top-level owner.
+
+  -- Gate is the root-owned container for locked access.
   gate = group({ owner = groups.root, mode = independent }),
 
+  -- accessGate is interlocked so splash and keypad replace each other inside gate.
   accessGate = group(
     { owner = groups.gate, mode = interlocked, startAt = pages.splash },
     {
@@ -36,21 +44,19 @@ local config = Navigator.compile({
     }
   ),
 
+  -- Session is the root-owned container for unlocked pages.
   session = group({ owner = groups.root, mode = independent }),
 
+  -- Regions are optional shared presentation areas with an owner-controlled lifetime; each region content value is its default.
+  -- Page fills override defaults, deeper pages win, and same-depth fills conflict.
   regions = {
-    background = region({ owner = groups.session, content = "Background" }),
     header = region({ owner = groups.session, content = "Header" }),
-    nav = region({
-      owner = groups.session,
-      content = {
-        user = "Navigation",
-        admin = { "Navigation", "Navigation Admin" },
-      },
-    }),
     footer = region({ owner = groups.session, content = "Footer" }),
+    ribbon = region({ owner = groups.session, content = { user = "Ribbon", admin = { "Ribbon", "Admin Ribbon" }}}),
+    background = region({ owner = groups.session, content = "Background" }),
   },
 
+  -- Tools are independent utility pages within the session.
   tools = group(
     { owner = groups.session, mode = independent },
     {
@@ -59,6 +65,7 @@ local config = Navigator.compile({
     }
   ),
 
+  -- System is the primary interlocked page group.
   system = group(
     { owner = groups.session, mode = interlocked, startAt = pages.home },
     {
@@ -88,7 +95,7 @@ local config = Navigator.compile({
         content = {
           admin = {
             "Audio Settings Admin",
-            regions.footer("Audio Settings Footer"),
+            regions.footer("Audio Settings Footer"), -- fill the footer region while this page is active
           },
         },
         controls = { open = "Open Audio Settings" },
@@ -118,4 +125,5 @@ local config = Navigator.compile({
   ),
 })
 
+-- Install the compiled config and initialize navigation.
 Navigator.apply(config)

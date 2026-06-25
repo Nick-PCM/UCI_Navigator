@@ -58,7 +58,7 @@ mode = independent
 
 ## Access
 
-Top-level `access` declares access levels. The examples use `locked`, `user`, and `admin`. `locked` is reserved for locked access, and `user` sets `default = true` so it becomes the default target for bare content and normal access requests.
+Top-level `access` declares access levels. The basic examples use `locked` and `user`; the advanced example adds `admin` as a custom access level. `locked` is reserved for locked access, and `user` sets `default = true` so it becomes the fallback target for bare content and normal access requests.
 
 ```lua
 access = {

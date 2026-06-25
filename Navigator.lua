@@ -19,41 +19,31 @@ Navigator.OwnerVisibility = { -- page-owned group owner view policy
 }
 
 local ROOT_OWNER = "root" -- implicit top-level interlocked owner
-local DEFAULT_ACCESS = Navigator.Access.DEFAULT
 
-local MARKER_GROUP = "navigator.group"
-local MARKER_PAGE = "navigator.page"
-local MARKER_REGION = "navigator.region"
-local MARKER_REF = "navigator.ref"
-local MARKER_REGION_FILL = "navigator.regionFill"
-local MARKER_MODE = "navigator.mode"
+-- Authoring/compiler support -------------------------------------------------
 
-local config -- validated project configuration
-local state = {
-  access = Navigator.Access.LOCKED, -- current access level
-  activePageIds = {}, -- active page set
-  activeGroupIds = {}, -- active group set
-}
+-- Marker strings tag authoring helper outputs so compile can recognize
+-- Navigator constructs without mistaking ordinary project tables for them.
+local MARKER_GROUP = "navigator.group" -- authored group(...) marker
+local MARKER_PAGE = "navigator.page" -- authored page(...) marker
+local MARKER_REGION = "navigator.region" -- authored region(...) marker
+local MARKER_REF = "navigator.ref" -- symbolic pages/groups/regions reference
+local MARKER_REGION_FILL = "navigator.regionFill" -- callable region fill marker
+local MARKER_MODE = "navigator.mode" -- interlocked/independent mode marker
 
-local indexes = {} -- derived lookup tables built from config
-local visibleLayers = {} -- last applied physical layer set
-local visibilityInitialized = false -- whether first visibility pass has run
-local historyBack = {} -- back navigation snapshot stack
-local historyForward = {} -- forward navigation snapshot stack
-local accessStateControl -- Q-SYS control mirroring active access
-local logging = {} -- enabled log categories
-local anyLoggingEnabled = false -- fast skip when all logging is off
-
+-- Creates tagged compile-time values that validation can distinguish from user tables.
 local function marker(kind, fields)
   fields = fields or {}
   fields.__navigatorMarker = kind
   return fields
 end
 
+-- Tests whether a table is one of Navigator's compile-time marker objects.
 local function isMarker(value, kind)
   return type(value) == "table" and value.__navigatorMarker == kind
 end
 
+-- Creates a symbolic typed reference; region references are callable fill makers.
 local function makeRef(kind, id)
   local ref = marker(MARKER_REF, { kind = kind, id = id })
   if kind == "region" then
@@ -69,6 +59,7 @@ local function makeRef(kind, id)
   return ref
 end
 
+-- Builds lazy registries such as pages.audio and regions.footer.
 local function makeRegistry(kind, builtIns)
   return setmetatable({}, {
     __index = function(_, id)
@@ -94,14 +85,17 @@ local independentMode = marker(MARKER_MODE, {
   value = Navigator.GroupBehavior.INDEPENDENT,
 })
 
+-- Authoring constructor for lifecycle groups and their direct pages.
 function Navigator.group(spec, pages)
   return marker(MARKER_GROUP, { spec = spec or {}, pages = pages or {} })
 end
 
+-- Authoring constructor for navigable visible pages.
 function Navigator.page(spec)
   return marker(MARKER_PAGE, { spec = spec or {} })
 end
 
+-- Authoring constructor for owner-scoped shared presentation regions.
 function Navigator.region(spec)
   return marker(MARKER_REGION, { spec = spec or {} })
 end
@@ -112,6 +106,7 @@ Navigator.regions = regionsRegistry
 Navigator.interlocked = interlockedMode
 Navigator.independent = independentMode
 
+-- Exposes bare authoring helpers for Q-SYS scripts and compact examples.
 if _G then
   rawset(_G, "group", rawget(_G, "group") or Navigator.group)
   rawset(_G, "page", rawget(_G, "page") or Navigator.page)
@@ -122,6 +117,26 @@ if _G then
   rawset(_G, "interlocked", rawget(_G, "interlocked") or interlockedMode)
   rawset(_G, "independent", rawget(_G, "independent") or independentMode)
 end
+
+-- Core runtime helpers -------------------------------------------------------
+
+local config -- validated project configuration
+
+-- Mutable runtime navigation state: current access plus active pages and groups.
+local state = {
+  access = Navigator.Access.LOCKED, -- current access level
+  activePageIds = {}, -- active page set
+  activeGroupIds = {}, -- active group set
+}
+
+local indexes = {} -- derived lookup tables built from config
+local visibleLayers = {} -- last applied physical layer set
+local visibilityInitialized = false -- whether first visibility pass has run
+local historyBack = {} -- back navigation snapshot stack
+local historyForward = {} -- forward navigation snapshot stack
+local accessStateControl -- Q-SYS control mirroring active access
+local logging = {} -- enabled log categories
+local anyLoggingEnabled = false -- fast skip when all logging is off
 
 -- Copies a set-like table so callers cannot mutate navigator state by reference.
 local function copyTable(source)
@@ -291,12 +306,14 @@ local function hiddenOwnerPageIds()
   return hidden
 end
 
+-- Tests whether a group, page, or root owner is currently active.
 local function ownerIsActive(ownerId)
   if ownerId == ROOT_OWNER then return true end
   return state.activeGroupIds[ownerId] == true
     or state.activePageIds[ownerId] == true
 end
 
+-- Chooses region default access from the owning page or current access state.
 local function accessForOwner(ownerId)
   if indexes.pagesById[ownerId] then
     return effectiveAccessForPage(ownerId)
@@ -842,6 +859,8 @@ onSessionTimeout = function()
   requestAccess(Navigator.Access.LOCKED)
 end
 
+-- Runtime config validation --------------------------------------------------
+
 -- Supported per-page control aliases.
 local pageControlKeys = {
   open = true,
@@ -923,7 +942,7 @@ local function normalizeConfig(candidate)
   end
 end
 
--- Validates that a page or override has usable access-keyed layer lists.
+-- Validates that a page, region, or fill has usable access-keyed layer lists.
 local function validateViews(pageId, views, levels)
   assert(type(views) == "table", pageId .. " requires views")
   for access, layerNames in pairs(views) do
@@ -1239,6 +1258,9 @@ local function validateConfig(candidate)
   end
 end
 
+-- Authoring compiler ---------------------------------------------------------
+
+-- Copies public spec fields while dropping fields handled by the compiler.
 local function clonePlainTable(source, skip)
   local result = {}
   for key, value in pairs(source or {}) do
@@ -1247,6 +1269,7 @@ local function clonePlainTable(source, skip)
   return result
 end
 
+-- Resolves a typed reference marker into its authored ID.
 local function refId(value, expectedKind, context)
   assert(isMarker(value, MARKER_REF),
     context .. " must be a " .. expectedKind .. " reference")
@@ -1255,6 +1278,7 @@ local function refId(value, expectedKind, context)
   return value.id
 end
 
+-- Resolves owner references, which may point to a group or a page.
 local function resolveOwnerRef(value, context)
   assert(isMarker(value, MARKER_REF),
     context .. " must be a group or page reference")
@@ -1263,10 +1287,12 @@ local function resolveOwnerRef(value, context)
   return value.id
 end
 
+-- Resolves a page reference marker into its authored page ID.
 local function resolvePageRef(value, context)
   return refId(value, "page", context)
 end
 
+-- Resolves authored control names through Q-SYS Controls while preserving objects.
 local function compileControl(ownerId, value)
   if type(value) == "string" then
     assert(type(Controls) == "table",
@@ -1285,6 +1311,7 @@ local function compileControl(ownerId, value)
   return value
 end
 
+-- Compiles a page/global controls table and rejects unsupported control aliases.
 local function compileControls(ownerId, controls, allowedKeys)
   if controls == nil then return nil end
   assert(type(controls) == "table", ownerId .. " controls must be a table")
@@ -1297,6 +1324,7 @@ local function compileControls(ownerId, controls, allowedKeys)
   return compiled
 end
 
+-- Adds a layer item or region fill into the compiled access-keyed content tables.
 local function addContentItem(ownerId, access, item, views, fills)
   if type(item) == "string" then
     views[access] = views[access] or {}
@@ -1309,7 +1337,6 @@ local function addContentItem(ownerId, access, item, views, fills)
     assert(fills[regionId][access] == nil,
       ownerId .. " fills region " .. regionId .. " more than once for " .. access)
     local fillViews = {}
-    local fillFills = {}
     local normalized = item.content
     if type(normalized) == "string" then normalized = { normalized } end
     assert(type(normalized) == "table" and normalized[1] ~= nil,
@@ -1317,7 +1344,7 @@ local function addContentItem(ownerId, access, item, views, fills)
     for _, fillItem in ipairs(normalized) do
       assert(type(fillItem) == "string",
         ownerId .. " region fill content must contain only layer names")
-      addContentItem(ownerId, access, fillItem, fillViews, fillFills)
+      addContentItem(ownerId, access, fillItem, fillViews, {})
     end
     fills[regionId][access] = fillViews[access]
     return
@@ -1325,6 +1352,7 @@ local function addContentItem(ownerId, access, item, views, fills)
   error(ownerId .. " content contains an unsupported item")
 end
 
+-- Compiles authored content into page/region views plus per-page region fills.
 local function compileContent(ownerId, content, defaultAccess)
   local views = {}
   local fills = {}
@@ -1355,6 +1383,7 @@ local function compileContent(ownerId, content, defaultAccess)
   return views, fills
 end
 
+-- Compiles authored access levels into the runtime access configuration.
 local function compileAccess(authored)
   assert(type(authored) == "table", "access must be a table")
   local compiled = {
@@ -1393,13 +1422,15 @@ local function compileAccess(authored)
       compiled.sessionTimeoutSeconds = definition.sessionTimeoutSeconds
     end
   end
-  compiled.defaultLevelId = compiled.defaultLevelId or DEFAULT_ACCESS
+  assert(compiled.defaultLevelId ~= nil,
+    "one non-locked access level must set default = true")
   if compiled.keypadRequired and compiled.pinEntryTimeoutSeconds == nil then
     compiled.pinEntryTimeoutSeconds = 0
   end
   return compiled
 end
 
+-- Compiles group ownership, mode, default page, and owner visibility.
 local function compileGroupSpec(groupId, spec)
   assert(type(spec) == "table", groupId .. " group spec must be a table")
   local mode = spec.mode
@@ -1423,6 +1454,7 @@ local function compileGroupSpec(groupId, spec)
   return compiled
 end
 
+-- Compiles one authored page into the runtime page representation.
 local function compilePage(pageId, pageMarker, groupId, defaultAccess)
   local spec = pageMarker.spec
   assert(type(spec) == "table", pageId .. " page spec must be a table")
@@ -1440,6 +1472,7 @@ local function compilePage(pageId, pageMarker, groupId, defaultAccess)
   return compiled
 end
 
+-- Compiles one authored region into the runtime region representation.
 local function compileRegion(regionId, regionMarker, defaultAccess)
   local spec = regionMarker.spec
   assert(type(spec) == "table", regionId .. " region spec must be a table")
@@ -1455,6 +1488,7 @@ local function compileRegion(regionId, regionMarker, defaultAccess)
   return compiled
 end
 
+-- Public compiler from authoring format into validated runtime configuration.
 function Navigator.compile(project)
   assert(type(project) == "table", "compile requires a project table")
   local access = compileAccess(project.access or {})
@@ -1473,6 +1507,7 @@ function Navigator.compile(project)
     regions = {},
   }
 
+  -- First scan top-level authored group blocks so page ownership can target them.
   for key, value in pairs(project) do
     if isMarker(value, MARKER_GROUP) then
       assert(type(key) == "string" and key ~= "", "group IDs must be strings")
@@ -1482,6 +1517,7 @@ function Navigator.compile(project)
     end
   end
 
+  -- Then compile pages nested inside each authored group block.
   for groupId, groupMarker in pairs(project) do
     if isMarker(groupMarker, MARKER_GROUP) then
       for pageId, pageMarker in pairs(groupMarker.pages or {}) do
@@ -1495,6 +1531,7 @@ function Navigator.compile(project)
     end
   end
 
+  -- Regions are optional and live in their own top-level namespace.
   if project.regions ~= nil then
     assert(type(project.regions) == "table", "regions must be a table")
     for regionId, regionMarker in pairs(project.regions) do
@@ -1510,6 +1547,8 @@ function Navigator.compile(project)
   validateConfig(compiled)
   return compiled
 end
+
+-- Runtime installation and control binding ----------------------------------
 
 -- Caches logging settings so disabled logging is cheap at runtime.
 local function configureLogging()
