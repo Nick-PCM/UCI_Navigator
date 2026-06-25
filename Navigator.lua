@@ -1,43 +1,44 @@
 -- Navigator.lua
--- V2 ownership/group based navigation for a layer-based Q-SYS UCI.
+-- Ownership/group based navigation for a layer-based Q-SYS UCI.
 
-local Navigator = {}
+local Navigator = {} -- public module table returned to the project script
 
-Navigator.Access = {
-  LOCKED = "locked",
-  DEFAULT = "default",
+Navigator.Access = { -- built-in access names
+  LOCKED = "locked", -- locked/splash/keypad access
+  DEFAULT = "default", -- normal unlocked fallback access
 }
 
-Navigator.GroupBehavior = {
-  INTERLOCKED = "interlocked",
-  INDEPENDENT = "independent",
+Navigator.GroupBehavior = { -- how direct group members coexist
+  INTERLOCKED = "interlocked", -- one direct member active at a time
+  INDEPENDENT = "independent", -- multiple direct members may be active
 }
 
-Navigator.OwnerView = {
-  KEEP = "keep",
-  HIDE = "hide",
+Navigator.OwnerVisibility = { -- page-owned group owner view policy
+  VISIBLE = "visible", -- keep owner page layer visible
+  HIDDEN = "hidden", -- suppress owner page layer while group is active
 }
 
-local ROOT_OWNER = "root"
-local LOCKED_GROUP = "lockedGroup"
-local UNLOCKED_GROUP = "unlockedGroup"
+local ROOT_OWNER = "root" -- implicit top-level interlocked owner
+local LOCKED_GROUP = "lockedGroup" -- required group for locked pages
+local UNLOCKED_GROUP = "unlockedGroup" -- required group for unlocked pages
 
-local config
+local config -- validated project configuration
 local state = {
-  access = Navigator.Access.LOCKED,
-  activePageIds = {},
-  activeGroupIds = {},
+  access = Navigator.Access.LOCKED, -- current access level
+  activePageIds = {}, -- active page set
+  activeGroupIds = {}, -- active group set
 }
 
-local indexes = {}
-local visibleLayers = {}
-local visibilityInitialized = false
-local historyBack = {}
-local historyForward = {}
-local accessStateControl
-local logging = {}
-local anyLoggingEnabled = false
+local indexes = {} -- derived lookup tables built from config
+local visibleLayers = {} -- last applied physical layer set
+local visibilityInitialized = false -- whether first visibility pass has run
+local historyBack = {} -- back navigation snapshot stack
+local historyForward = {} -- forward navigation snapshot stack
+local accessStateControl -- Q-SYS control mirroring active access
+local logging = {} -- enabled log categories
+local anyLoggingEnabled = false -- fast skip when all logging is off
 
+-- Copies a set-like table so callers cannot mutate navigator state by reference.
 local function copyTable(source)
   local result = {}
   for key, value in pairs(source or {}) do
@@ -46,6 +47,7 @@ local function copyTable(source)
   return result
 end
 
+-- Captures the active page/group state used for history and change detection.
 local function copyStateSnapshot()
   return {
     activePageIds = copyTable(state.activePageIds),
@@ -53,6 +55,7 @@ local function copyStateSnapshot()
   }
 end
 
+-- Compares two set-like tables without caring about table identity.
 local function sameSet(a, b)
   for key in pairs(a or {}) do
     if not b[key] then return false end
@@ -63,15 +66,18 @@ local function sameSet(a, b)
   return true
 end
 
+-- Determines whether a navigation operation actually changed visible state.
 local function sameSnapshot(a, b)
   return sameSet(a.activePageIds, b.activePageIds)
     and sameSet(a.activeGroupIds, b.activeGroupIds)
 end
 
+-- Distinguishes a multi-control alias list from a single Q-SYS control object.
 local function isControlList(value)
   return type(value) == "table" and value[1] ~= nil
 end
 
+-- Applies wiring or state updates to an optional single control or control list.
 local function forEachControl(controlOrList, callback)
   if controlOrList == nil then return end
   if isControlList(controlOrList) then
@@ -83,18 +89,22 @@ local function forEachControl(controlOrList, callback)
   end
 end
 
+-- Checks category logging with a fast global off path.
 local function shouldLog(category)
   return anyLoggingEnabled and logging[category] == true
 end
 
+-- Emits a standardized navigator log line.
 local function log(category, message)
   print("Navigator " .. category .. ": " .. message)
 end
 
+-- Centralizes the locked access test used by access and view resolution.
 local function isLockedAccess(access)
   return access == Navigator.Access.LOCKED
 end
 
+-- Tests whether a group lives under another group in the ownership tree.
 local function groupIsUnder(groupId, ancestorGroupId)
   local current = groupId
   while current do
@@ -106,30 +116,36 @@ local function groupIsUnder(groupId, ancestorGroupId)
   return false
 end
 
+-- Identifies pages that should resolve locked views regardless of active access.
 local function pageIsInLockedGroup(pageId)
   return groupIsUnder(indexes.pageGroupByPageId[pageId], LOCKED_GROUP)
 end
 
+-- Chooses the access level a page should use for its view lookup.
 local function effectiveAccessForPage(pageId)
   if pageIsInLockedGroup(pageId) then return Navigator.Access.LOCKED end
   return state.access
 end
 
+-- Resolves a page view with default fallback for unlocked access levels.
 local function viewForAccess(page, access)
   return page.views[access]
     or (not isLockedAccess(access) and page.views[Navigator.Access.DEFAULT])
 end
 
+-- Resolves an access-keyed layer table, used by frame overrides.
 local function viewTableForAccess(views, access)
   return views[access]
     or (not isLockedAccess(access) and views[Navigator.Access.DEFAULT])
 end
 
+-- Resolves the concrete layer list for a page in the current or supplied access.
 local function viewForPageId(pageId, access)
   local page = config.pages[pageId]
   return viewForAccess(page, access or effectiveAccessForPage(pageId))
 end
 
+-- Adds layer names into the desired visibility set.
 local function addLayers(destination, layerNames)
   if not layerNames then return end
   for _, layerName in ipairs(layerNames) do
@@ -137,6 +153,7 @@ local function addLayers(destination, layerNames)
   end
 end
 
+-- Sends one physical layer visibility change to Q-SYS.
 local function setLayerVisibility(layerName, isVisible)
   Uci.SetLayerVisibility(
     config.uci.pageName or "Main",
@@ -146,6 +163,7 @@ local function setLayerVisibility(layerName, isVisible)
   )
 end
 
+-- Collects every declared layer so first reconciliation can hide stale layers.
 local function collectConfiguredLayers()
   local layers = {}
   for _, page in pairs(config.pages) do
@@ -161,16 +179,18 @@ local function collectConfiguredLayers()
   return layers
 end
 
+-- Calculates page nesting depth for frame override precedence.
 local function pageDepth(pageId)
   local groupId = indexes.pageGroupByPageId[pageId]
   return #(indexes.groupAncestorsById[groupId] or {}) + 1
 end
 
+-- Finds active owner pages whose own view is suppressed by owned groups.
 local function hiddenOwnerPageIds()
   local hidden = {}
   for groupId in pairs(state.activeGroupIds) do
     local group = config.pageGroups[groupId]
-    if group and group.ownerView == Navigator.OwnerView.HIDE then
+    if group and group.ownerVisibility == Navigator.OwnerVisibility.HIDDEN then
       local owner = indexes.groupOwnerById[groupId]
       if indexes.ownerKindByGroupId[groupId] == "page" then
         hidden[owner] = true
@@ -180,6 +200,7 @@ local function hiddenOwnerPageIds()
   return hidden
 end
 
+-- Selects the active frame override for each role, preferring deeper pages.
 local function selectedFrameOverrides()
   local selected = {}
   for pageId in pairs(state.activePageIds) do
@@ -204,6 +225,7 @@ local function selectedFrameOverrides()
   return selected
 end
 
+-- Converts active navigator state into the full desired layer set.
 local function resolveDesiredLayers()
   local desired = {}
   local hidden = hiddenOwnerPageIds()
@@ -228,6 +250,7 @@ local function resolveDesiredLayers()
   return desired
 end
 
+-- Diffs desired layers against current layers and applies Q-SYS changes.
 local function reconcileVisibility()
   local desired = resolveDesiredLayers()
   local layersToCheck = visibilityInitialized
@@ -244,6 +267,7 @@ local function reconcileVisibility()
   visibilityInitialized = true
 end
 
+-- Pushes a history snapshot while respecting the configured history cap.
 local function cappedPush(stack, snapshot)
   stack[#stack + 1] = snapshot
   local maxEntries = config.historyMaxEntries
@@ -252,6 +276,7 @@ local function cappedPush(stack, snapshot)
   if #stack > maxEntries then table.remove(stack, 1) end
 end
 
+-- Keeps optional history controls disabled when their stack is empty.
 local function updateHistoryControls()
   local controls = config and config.historyControls
   if not controls then return end
@@ -263,6 +288,7 @@ local function updateHistoryControls()
   end)
 end
 
+-- Clears both history stacks when navigation crosses an access/keypad boundary.
 local function clearHistory()
   local hadHistory = #historyBack > 0 or #historyForward > 0
   historyBack = {}
@@ -271,6 +297,7 @@ local function clearHistory()
   if hadHistory and shouldLog("history") then log("history", "cleared") end
 end
 
+-- Records the previous state after a page navigation changes state.
 local function recordHistory(before)
   cappedPush(historyBack, before)
   historyForward = {}
@@ -278,6 +305,7 @@ local function recordHistory(before)
   if shouldLog("history") then log("history", "recorded state") end
 end
 
+-- Deactivates a group, its direct active pages, and any active owned groups.
 local function closeGroup(groupId)
   for pageId, page in pairs(config.pages) do
     if state.activePageIds[pageId]
@@ -293,18 +321,21 @@ local function closeGroup(groupId)
   state.activeGroupIds[groupId] = nil
 end
 
+-- Closes subordinate groups when their owner page is closed.
 local function closeGroupsOwnedByPage(pageId)
   for groupId in pairs(indexes.groupsOwnedByOwnerId[pageId] or {}) do
     if state.activeGroupIds[groupId] then closeGroup(groupId) end
   end
 end
 
+-- Removes one page and its owned groups without applying default-page policy.
 local function closePageOnly(pageId)
   if not state.activePageIds[pageId] then return end
   closeGroupsOwnedByPage(pageId)
   state.activePageIds[pageId] = nil
 end
 
+-- Checks whether a group still has directly active pages or child groups.
 local function groupHasActiveDirectMembers(groupId)
   for pageId in pairs(indexes.pagesByGroupId[groupId] or {}) do
     if state.activePageIds[pageId] then return true end
@@ -315,6 +346,7 @@ local function groupHasActiveDirectMembers(groupId)
   return false
 end
 
+-- Determines how an owner's direct groups/pages should interlock.
 local function ownerBehavior(ownerId)
   if ownerId == ROOT_OWNER then return Navigator.GroupBehavior.INTERLOCKED end
   local group = config.pageGroups[ownerId]
@@ -322,6 +354,7 @@ local function ownerBehavior(ownerId)
   return Navigator.GroupBehavior.INDEPENDENT
 end
 
+-- Enforces interlock by closing active siblings under the same owner.
 local function closeOtherDirectMembers(ownerId, keepKind, keepId)
   if ownerBehavior(ownerId) ~= Navigator.GroupBehavior.INTERLOCKED then return end
 
@@ -346,6 +379,7 @@ local activatePage
 local activateGroup
 local activateDefaultOwnedGroups
 
+-- Activates a group and its owning chain before opening pages within it.
 activateGroup = function(groupId, options)
   options = options or {}
   if state.activeGroupIds[groupId] then return end
@@ -365,6 +399,7 @@ activateGroup = function(groupId, options)
   end
 end
 
+-- Opens default pages for groups owned by an active group or page.
 activateDefaultOwnedGroups = function(ownerId)
   for groupId in pairs(indexes.groupsOwnedByOwnerId[ownerId] or {}) do
     local defaults = indexes.groupDefaultPagesById[groupId]
@@ -386,6 +421,7 @@ activateDefaultOwnedGroups = function(ownerId)
   end
 end
 
+-- Opens a page, activating required groups and owned default groups.
 activatePage = function(pageId, options)
   options = options or {}
   local page = config.pages[pageId]
@@ -402,6 +438,7 @@ activatePage = function(pageId, options)
   end
 end
 
+-- Opens the configured default page or pages for a group.
 local function activateDefaultPageForGroup(groupId)
   local defaults = indexes.groupDefaultPagesById[groupId]
   if not defaults or #defaults == 0 then return false end
@@ -411,11 +448,13 @@ local function activateDefaultPageForGroup(groupId)
   return true
 end
 
+-- Restores a previously captured page/group state for history navigation.
 local function restoreSnapshot(snapshot)
   state.activePageIds = copyTable(snapshot.activePageIds)
   state.activeGroupIds = copyTable(snapshot.activeGroupIds)
 end
 
+-- Interlocks page open controls to reflect the currently active pages.
 local function updatePageOpenControls()
   if not config then return end
   for pageId, page in pairs(config.pages) do
@@ -430,6 +469,7 @@ end
 local onPinEntryTimeout
 local onSessionTimeout
 
+-- Lazily creates the keypad entry timeout timer.
 local function pinEntryTimer()
   if not Navigator._pinEntryTimer then
     Navigator._pinEntryTimer = Timer.New()
@@ -441,6 +481,7 @@ local function pinEntryTimer()
   return Navigator._pinEntryTimer
 end
 
+-- Lazily creates the unlocked-session timeout timer.
 local function sessionTimer()
   if not Navigator._sessionTimer then
     Navigator._sessionTimer = Timer.New()
@@ -452,14 +493,17 @@ local function sessionTimer()
   return Navigator._sessionTimer
 end
 
+-- Stops keypad entry timing when keypad is closed or disabled.
 local function stopPinEntryTimer()
   if Navigator._pinEntryTimer then Navigator._pinEntryTimer:Stop() end
 end
 
+-- Stops session timing when locked or before resetting access.
 local function stopSessionTimer()
   if Navigator._sessionTimer then Navigator._sessionTimer:Stop() end
 end
 
+-- Starts or stops keypad timing based on whether the keypad page is active.
 local function restartPinEntryTimer()
   if not config.access.keypadRequired
       or config.access.pinEntryTimeoutSeconds == 0 then
@@ -473,6 +517,7 @@ local function restartPinEntryTimer()
   end
 end
 
+-- Restarts the session timer while the navigator is unlocked.
 local function restartSessionTimer()
   if isLockedAccess(state.access)
       or config.access.sessionTimeoutSeconds == 0 then
@@ -482,6 +527,7 @@ local function restartSessionTimer()
   sessionTimer():Start(config.access.sessionTimeoutSeconds)
 end
 
+-- Finishes a page navigation by reconciling controls, layers, timers, and history.
 local function applyNavigationChange(before, record)
   updatePageOpenControls()
   reconcileVisibility()
@@ -494,6 +540,7 @@ local function applyNavigationChange(before, record)
   end
 end
 
+-- Shared page-open path used by public navigation and internal transitions.
 local function openPageInternal(pageId, record)
   local before = copyStateSnapshot()
   if shouldLog("navigation") then log("navigation", "open " .. pageId) end
@@ -501,6 +548,7 @@ local function openPageInternal(pageId, record)
   applyNavigationChange(before, record)
 end
 
+-- Shared page-close path that applies default and empty-group behavior.
 local function closePageInternal(pageId, record)
   local before = copyStateSnapshot()
   if not state.activePageIds[pageId] then
@@ -537,6 +585,7 @@ local function closePageInternal(pageId, record)
   applyNavigationChange(before, record)
 end
 
+-- Prunes active pages that do not define a view for a new access level.
 local function closeUnavailablePages(targetAccess)
   local activeIds = {}
   for pageId in pairs(state.activePageIds) do
@@ -553,15 +602,18 @@ local function closeUnavailablePages(targetAccess)
   end
 end
 
+-- Mirrors navigator access into the configured Q-SYS access state control.
 local function writeAccessState(targetAccess)
   if accessStateControl then accessStateControl.String = targetAccess end
 end
 
+-- Changes access through the same path used by user-facing controls.
 local function requestAccess(targetAccess)
   writeAccessState(targetAccess)
   Navigator.setAccess(targetAccess)
 end
 
+-- Returns the configured home page for locked or unlocked entry.
 local function accessHomePageId(access)
   if isLockedAccess(access) then
     return config.access.levels[Navigator.Access.LOCKED].homePageId
@@ -569,6 +621,7 @@ local function accessHomePageId(access)
   return config.access.levels[Navigator.Access.DEFAULT].homePageId
 end
 
+-- Moves the navigator across access boundaries and resets state as needed.
 function Navigator.setAccess(targetAccess)
   assert(config, "configure Navigator before changing access")
   assert(type(targetAccess) == "string" and config.access.levels[targetAccess],
@@ -605,16 +658,19 @@ function Navigator.setAccess(targetAccess)
   updateHistoryControls()
 end
 
+-- Public API for opening a page and recording history.
 function Navigator.openPage(pageId)
   assert(config, "configure Navigator before navigating")
   openPageInternal(pageId, true)
 end
 
+-- Public API for closing a page and recording history.
 function Navigator.closePage(pageId)
   assert(config, "configure Navigator before navigating")
   closePageInternal(pageId, true)
 end
 
+-- Restores the previous page/group snapshot from navigation history.
 function Navigator.back()
   assert(config, "configure Navigator before navigating")
   if #historyBack == 0 then
@@ -631,6 +687,7 @@ function Navigator.back()
   updateHistoryControls()
 end
 
+-- Restores the next page/group snapshot after a back operation.
 function Navigator.forward()
   assert(config, "configure Navigator before navigating")
   if #historyForward == 0 then
@@ -647,22 +704,26 @@ function Navigator.forward()
   updateHistoryControls()
 end
 
+-- Handles keypad inactivity by returning from keypad to the locked default.
 onPinEntryTimeout = function()
   if shouldLog("timeout") then log("timeout", "pin entry") end
   Navigator.closePage(config.access.keypadPageId)
 end
 
+-- Handles unlocked session expiry by returning to locked access.
 onSessionTimeout = function()
   if shouldLog("timeout") then log("timeout", "session") end
   requestAccess(Navigator.Access.LOCKED)
 end
 
+-- Supported per-page control aliases.
 local pageControlKeys = {
   open = true,
   close = true,
   openKeypad = true,
 }
 
+-- Supported global access control aliases.
 local accessControlKeys = {
   state = true,
   request = true,
@@ -670,11 +731,13 @@ local accessControlKeys = {
   activityPulse = true,
 }
 
+-- Supported global history control aliases.
 local historyControlKeys = {
   back = true,
   forward = true,
 }
 
+-- Supported logging categories.
 local loggingKeys = {
   access = true,
   navigation = true,
@@ -684,6 +747,7 @@ local loggingKeys = {
   controls = true,
 }
 
+-- Validates access level names before they are used as view keys.
 local function validateAccessName(ownerId, access)
   assert(type(access) == "string" and access ~= "",
     ownerId .. " has an invalid access level")
@@ -691,6 +755,7 @@ local function validateAccessName(ownerId, access)
     ownerId .. " access levels must be lowercase")
 end
 
+-- Validates that a page or override has usable access-keyed layer lists.
 local function validateViews(pageId, views, levels)
   assert(type(views) == "table", pageId .. " requires views")
   for access, layerNames in pairs(views) do
@@ -705,6 +770,7 @@ local function validateViews(pageId, views, levels)
   end
 end
 
+-- Validates optional Q-SYS control aliases without touching missing controls.
 local function validateControls(ownerId, controls, allowedKeys)
   assert(type(controls) == "table", ownerId .. " controls must be a table")
   for key, controlOrList in pairs(controls) do
@@ -722,6 +788,7 @@ local function validateControls(ownerId, controls, allowedKeys)
   end
 end
 
+-- Validates named frame roles before pages can override them.
 local function validateFrameRoles(candidate)
   if candidate.frameRoles == nil then return end
   assert(type(candidate.frameRoles) == "table", "frameRoles must be a table")
@@ -735,6 +802,7 @@ local function validateFrameRoles(candidate)
   end
 end
 
+-- Validates per-page frame replacement layers.
 local function validateFrameOverrides(pageId, frameOverrides, levels, frameRoles)
   if frameOverrides == nil then return end
   assert(type(frameOverrides) == "table",
@@ -748,6 +816,7 @@ local function validateFrameOverrides(pageId, frameOverrides, levels, frameRoles
   end
 end
 
+-- Validates access levels, keypad requirements, and timeout settings.
 local function validateAccess(access)
   assert(type(access) == "table", "access must be a table")
   assert(type(access.levels) == "table", "access.levels must be a table")
@@ -791,19 +860,20 @@ local function validateAccess(access)
     "access.sessionTimeoutSeconds must be a number >= 0")
 end
 
+-- Builds lookup tables that make runtime navigation avoid config scans.
 local function buildIndexes(candidate)
   indexes = {
-    groupsById = {},
-    pagesById = {},
-    pageGroupByPageId = {},
-    groupOwnerById = {},
-    groupsOwnedByOwnerId = {},
-    pagesByGroupId = {},
-    groupBehaviorById = {},
-    groupOwnerViewById = {},
-    groupDefaultPagesById = {},
-    groupAncestorsById = {},
-    ownerKindByGroupId = {},
+    groupsById = {}, -- all group definitions by group id
+    pagesById = {}, -- all page definitions by page id
+    pageGroupByPageId = {}, -- owning group for each page
+    groupOwnerById = {}, -- owner id for each group
+    groupsOwnedByOwnerId = {}, -- child groups owned by each owner
+    pagesByGroupId = {}, -- direct pages in each group
+    groupBehaviorById = {}, -- interlocked/independent behavior by group
+    groupOwnerVisibilityById = {}, -- owner visibility policy by group
+    groupDefaultPagesById = {}, -- default page list by group
+    groupAncestorsById = {}, -- group-owner ancestor chain by group
+    ownerKindByGroupId = {}, -- root/group/page owner type by group
   }
 
   for groupId, group in pairs(candidate.pageGroups) do
@@ -825,7 +895,7 @@ local function buildIndexes(candidate)
     local owner = group.owner
     indexes.groupOwnerById[groupId] = owner
     indexes.groupBehaviorById[groupId] = group.behavior
-    indexes.groupOwnerViewById[groupId] = group.ownerView
+    indexes.groupOwnerVisibilityById[groupId] = group.ownerVisibility
     indexes.groupDefaultPagesById[groupId] = group.defaultPageIds or {}
     indexes.groupsOwnedByOwnerId[owner] = indexes.groupsOwnedByOwnerId[owner] or {}
     indexes.groupsOwnedByOwnerId[owner][groupId] = true
@@ -840,8 +910,9 @@ local function buildIndexes(candidate)
     end
   end
 
-  local visiting = {}
-  local visited = {}
+  local visiting = {} -- groups currently in the ancestor walk
+  local visited = {} -- groups whose ancestors are already cached
+  -- Computes ownership ancestors and detects cycles in group ownership.
   local function ancestorsFor(groupId)
     if visited[groupId] then return indexes.groupAncestorsById[groupId] end
     assert(not visiting[groupId], groupId .. " has an ownership cycle")
@@ -863,6 +934,7 @@ local function buildIndexes(candidate)
   for groupId in pairs(candidate.pageGroups) do ancestorsFor(groupId) end
 end
 
+-- Validates the complete authoring model before Navigator accepts it.
 local function validateConfig(candidate)
   assert(type(candidate.uci) == "table", "uci must be a table")
   assert(candidate.uci.pageName == nil
@@ -882,13 +954,13 @@ local function validateConfig(candidate)
   for pageId, page in pairs(candidate.pages) do
     assert(type(pageId) == "string" and pageId ~= "", "page IDs must be strings")
     assert(type(page) == "table", pageId .. " page definition must be a table")
-    assert(page.parentId == nil, pageId .. ".parentId is not supported in V2")
+    assert(page.parentId == nil, pageId .. ".parentId is not supported")
     assert(page.childDisplayMode == nil,
-      pageId .. ".childDisplayMode is not supported in V2")
+      pageId .. ".childDisplayMode is not supported")
     assert(page.parentVisibility == nil,
-      pageId .. ".parentVisibility is not supported in V2")
+      pageId .. ".parentVisibility is not supported")
     assert(page.defaultChildId == nil,
-      pageId .. ".defaultChildId is not supported in V2")
+      pageId .. ".defaultChildId is not supported")
     assert(type(page.pageGroup) == "string" and page.pageGroup ~= "",
       pageId .. " requires pageGroup")
     assert(candidate.pageGroups[page.pageGroup],
@@ -918,12 +990,12 @@ local function validateConfig(candidate)
       groupId .. " requires owner")
     local ownerKind = indexes.ownerKindByGroupId[groupId]
     if ownerKind == "page" then
-      assert(group.ownerView == Navigator.OwnerView.KEEP
-          or group.ownerView == Navigator.OwnerView.HIDE,
-        groupId .. " page-owned groups require ownerView")
+      assert(group.ownerVisibility == Navigator.OwnerVisibility.VISIBLE
+          or group.ownerVisibility == Navigator.OwnerVisibility.HIDDEN,
+        groupId .. " page-owned groups require ownerVisibility")
     else
-      assert(group.ownerView == nil,
-        groupId .. " ownerView is only valid for page-owned groups")
+      assert(group.ownerVisibility == nil,
+        groupId .. " ownerVisibility is only valid for page-owned groups")
     end
     if group.defaultPageIds then
       assert(type(group.defaultPageIds) == "table",
@@ -987,6 +1059,7 @@ local function validateConfig(candidate)
   end
 end
 
+-- Caches logging settings so disabled logging is cheap at runtime.
 local function configureLogging()
   logging = config.logging or {}
   anyLoggingEnabled = false
@@ -998,6 +1071,7 @@ local function configureLogging()
   end
 end
 
+-- Applies an access state control string as a navigator access request.
 local function applyAccessString(accessString)
   local targetAccess = string.lower(tostring(accessString or ""))
   if targetAccess == "" then return end
@@ -1008,6 +1082,7 @@ local function applyAccessString(accessString)
   Navigator.setAccess(targetAccess)
 end
 
+-- Wires configured Q-SYS controls to navigator actions.
 local function bindControls()
   local accessControls = config.accessControls
   if accessControls then
@@ -1087,6 +1162,7 @@ local function bindControls()
   end
 end
 
+-- Initializes Navigator with a validated project model and locked home state.
 function Navigator.configure(projectConfig)
   assert(not config, "Navigator may be configured only once")
   assert(type(projectConfig) == "table", "configure requires a config table")
@@ -1103,6 +1179,7 @@ function Navigator.configure(projectConfig)
   updateHistoryControls()
 end
 
+-- Returns a copy of current navigation state for diagnostics and tests.
 function Navigator.getState()
   return {
     access = state.access,
@@ -1113,6 +1190,7 @@ function Navigator.getState()
   }
 end
 
+-- Returns a copy of the last reconciled physical layer set.
 function Navigator.getVisibleLayers()
   return copyTable(visibleLayers)
 end

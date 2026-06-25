@@ -1,15 +1,17 @@
-# UCI Navigator V2
+# UCI Navigator
 
-Navigator V2 is a Lua module for controlling Q-SYS UCI layer visibility from a project-authored navigation model. It wires standard controls, tracks access state, opens and closes pages, manages history, and reconciles the visible Q-SYS layers after each navigation change.
+Navigator is a Lua module for controlling Q-SYS UCI layer visibility from a Lua table that describes your pages, page groups, Q-SYS layers, and controls. It wires standard controls, tracks access state, opens and closes pages, manages history, and reconciles the visible Q-SYS layers after each navigation change.
 
 The goal is to let a project describe its UCI in terms of logical pages and ownership instead of writing one-off layer show/hide scripts for every button.
 
 ## Files
 
-- `Navigator.lua`: the V2 module.
-- `VanillaExample.lua`: complete default-access example.
-- `StrawberryExample.lua`: complete advanced-access example.
-- `ArchitectureUpdate.md`: implementation notes and deeper design rules.
+- `Navigator.lua`: the navigation module.
+- `Navigator.md`: deeper model and runtime rules.
+- `Examples/Basic Keypad Example.lua`: complete default-access example with keypad access.
+- `Examples/Basic No Keypad Example.lua`: complete default-access example without keypad access.
+- `Examples/Advanced Access Example.lua`: complete advanced-access example.
+- `Examples/UCI Navigation Testing.qsys`: example Q-SYS design file.
 
 ## Mental Model
 
@@ -52,19 +54,19 @@ someGroup = {
 
 `defaultPageIds` is optional. When a group becomes active, defaults are opened if the group has no active page.
 
-For page-owned groups, `ownerView` is required:
+For page-owned groups, `ownerVisibility` is required:
 
 ```lua
 audioGroup = {
   owner = "audioPage",
   behavior = "interlocked",
-  ownerView = "keep",
+  ownerVisibility = "visible",
   defaultPageIds = { "audioRoutingPage" },
 }
 ```
 
-- `ownerView = "keep"` keeps the owner page visible behind owned pages.
-- `ownerView = "hide"` hides the owner page view while owned pages are active.
+- `ownerVisibility = "visible"` keeps the owner page visible behind owned pages.
+- `ownerVisibility = "hidden"` hides the owner page view while owned pages are active.
 
 ## Frame Roles And Overrides
 
@@ -169,6 +171,8 @@ access = {
 }
 ```
 
+If you want a locked splash page without password protection, set `keypadRequired = false` and omit `keypadPageId`. In that mode, an access request changes from `locked` to `default` directly.
+
 `locked` access uses locked views only; it does not fall back to default views.
 
 ## Access Levels
@@ -187,68 +191,6 @@ access = {
 
 Custom access levels render views with the matching key and fall back to `default` when a custom view is missing. If an active page has no target-access view and no default fallback, Navigator closes that page and anything it owns.
 
-## Common Patterns
-
-Main navigation:
-
-```lua
-mainGroup = {
-  owner = "unlockedGroup",
-  behavior = "interlocked",
-  defaultPageIds = { "homepage" },
-}
-```
-
-Opening `audioPage` closes `homepage` and `videoPage`.
-
-Page-owned interlocked subpages:
-
-```lua
-audioGroup = {
-  owner = "audioPage",
-  behavior = "interlocked",
-  ownerView = "keep",
-  defaultPageIds = { "audioRoutingPage" },
-}
-```
-
-Opening `audioSettingsPage` closes `audioRoutingPage`, while `audioPage` remains visible.
-
-Page-owned modal pages:
-
-```lua
-videoModalGroup = {
-  owner = "videoPage",
-  behavior = "independent",
-  ownerView = "keep",
-}
-```
-
-Opening a modal keeps `videoPage` visible. Closing the modal hides only that modal.
-
-Page-owned replacement pages:
-
-```lua
-videoReplacementGroup = {
-  owner = "videoPage",
-  behavior = "independent",
-  ownerView = "hide",
-}
-```
-
-Opening `videoTestPage` hides `videoPage` visually while keeping it logically active. Closing `videoTestPage` reveals `videoPage`.
-
-Independent system pages:
-
-```lua
-systemGroup = {
-  owner = "unlockedGroup",
-  behavior = "independent",
-}
-```
-
-Pages such as power confirmation or help can open without replacing the main navigation page.
-
 ## Controls
 
 Supported page controls:
@@ -257,7 +199,26 @@ Supported page controls:
 - `close`: closes the page.
 - `openKeypad`: opens the configured keypad page.
 
-Control fields can be a single Q-SYS control or a list of equivalent controls.
+Control fields can be a single Q-SYS control or a list of equivalent controls. Use a single control when there is one button for the action:
+
+```lua
+controls = {
+  open = Controls["Open Audio Page"],
+}
+```
+
+Use a list when multiple physical buttons should perform the same action and mirror the same active state, such as a nav button in the header and another on a page body:
+
+```lua
+controls = {
+  open = {
+    Controls["Header Open Audio"],
+    Controls["Body Open Audio"],
+  },
+}
+```
+
+Navigator wires each control in the list to the same page action and updates all equivalent open controls together during reconciliation.
 
 Open controls are treated as toggle-style navigation controls: when pressed, Navigator forces the control Boolean true and later updates related open controls from active page state. Trigger-style controls simply run their action when their event handler fires.
 
@@ -279,4 +240,4 @@ Navigator history stores active pages and active groups. Page open/close changes
 
 ## Starting Point
 
-Use `VanillaExample.lua` for a default-access project shape. Use `StrawberryExample.lua` to see how the same ownership tree supports an `advanced` access level.
+Use `Examples/Basic Keypad Example.lua` for a default-access project shape with keypad access. Use `Examples/Basic No Keypad Example.lua` for the same shape without keypad access. Use `Examples/Advanced Access Example.lua` to see how the same ownership tree supports an `advanced` access level.

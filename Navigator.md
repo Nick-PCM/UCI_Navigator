@@ -1,8 +1,6 @@
-# Navigator Architecture Update
+# Navigator
 
-This document defines the proposed ownership and page-group architecture for the next Navigator implementation. It is an implementation spec, not documentation for the current `Navigator.lua`.
-
-The current Navigator API has not been deployed. Do not spend implementation effort on backward compatibility with `parentId`, `childDisplayMode`, `parentVisibility`, or `defaultChildId`. The goal is a coherent fresh design.
+This document is a deeper companion to `README.md`. The README explains how to use Navigator; this file explains the model behind it and the rules the module follows at runtime.
 
 ## Goal
 
@@ -14,7 +12,7 @@ Navigator should model every navigable surface with the same primitive:
 - independent pages such as power confirmation, help, diagnostics, or status
 - custom access levels beyond `default`, such as `advanced`, `staff`, or `service`
 
-The proposed primitive is ownership:
+The core primitive is ownership:
 
 - A page group owns navigation policy.
 - A page owns views, controls, and physical layer intent.
@@ -23,7 +21,7 @@ The proposed primitive is ownership:
 
 Do not merge pages and groups. A page is visible content. A group is lifecycle policy.
 
-Compile the ownership tree once during `Navigator.configure(...)`, then use precomputed lookup tables at runtime. This should not become a general graph engine.
+Navigator compiles the ownership tree once during `Navigator.configure(...)`, then uses precomputed lookup tables at runtime. This keeps page navigation mostly to table lookups and active-state walks.
 
 ## Core Authoring Shape
 
@@ -68,8 +66,8 @@ Navigator.configure({
       owner = "root", -- or another group id, or a page id
       behavior = "interlocked", -- or "independent"
       defaultPageIds = { "pageId" },
-      -- ownerView is required only when owner names a page:
-      -- ownerView = "keep" or "hide",
+      -- ownerVisibility is required only when owner names a page:
+      -- ownerVisibility = "visible" or "hidden",
     },
   },
 
@@ -101,7 +99,7 @@ Navigator.configure({
 - `behavior`: Defines how a group's direct members coexist.
 - `root`: Reserved owner name for top-level groups.
 - `defaultPageIds`: Optional pages to activate when a group is activated without a more specific target.
-- `ownerView`: For page-owned groups only, controls whether the owner page's own view remains visible.
+- `ownerVisibility`: For page-owned groups only, controls whether the owner page's own view remains visible.
 - `frameRoles`: Names standard frame pages that active pages may override.
 - `frameOverrides`: Page-local replacement views for named frame roles.
 
@@ -116,9 +114,9 @@ Page ids and group ids share one owner namespace. Reject duplicate ids across `p
 
 `root` is reserved and is not a page or group id. Treat `root` as an implicit interlocked owner: only one direct root-owned group is active at a time. This makes `lockedGroup` and `unlockedGroup` mutually exclusive without requiring a synthetic root group in authoring.
 
-## Standard Groups
+## Common Groups
 
-Every project should define at least these groups:
+Most projects should define at least these groups:
 
 ```lua
 pageGroups = {
@@ -170,7 +168,7 @@ systemGroup = {
 audioGroup = {
   owner = "audioPage",
   behavior = "interlocked",
-  ownerView = "keep",
+  ownerVisibility = "visible",
 }
 ```
 
@@ -178,8 +176,9 @@ audioGroup = {
 
 Concrete authoring examples live in:
 
-- [VanillaExample.lua](VanillaExample.lua)
-- [StrawberryExample.lua](StrawberryExample.lua)
+- [Basic Keypad Example.lua](Examples/Basic%20Keypad%20Example.lua)
+- [Basic No Keypad Example.lua](Examples/Basic%20No%20Keypad%20Example.lua)
+- [Advanced Access Example.lua](Examples/Advanced%20Access%20Example.lua)
 
 ## Standard Locked Page Authoring
 
@@ -237,7 +236,7 @@ Access state remains the public boundary:
 
 ## Custom Access Levels
 
-V2 must preserve support for access levels beyond `locked` and `default`.
+Navigator supports access levels beyond `locked` and `default`.
 
 ```lua
 access = {
@@ -357,33 +356,33 @@ root
 
 ## Visibility Rules
 
-Ownership does not by itself decide whether an owner page's physical layers stay visible behind pages in owned groups. Page-owned groups use `ownerView`.
+Ownership does not by itself decide whether an owner page's physical layers stay visible behind pages in owned groups. Page-owned groups use `ownerVisibility`.
 
 ```lua
 videoModalGroup = {
   owner = "videoPage",
   behavior = "independent",
-  ownerView = "keep",
+  ownerVisibility = "visible",
 }
 
 audioGroup = {
   owner = "audioPage",
   behavior = "interlocked",
-  ownerView = "keep",
+  ownerVisibility = "visible",
 }
 ```
 
-Accepted `ownerView` values:
+Accepted `ownerVisibility` values:
 
-- `hide`: When this group has active pages, hide the owner page's own view while keeping the owner page logically active.
-- `keep`: Keep the owner page's resolved view visible while pages in this group are active.
+- `hidden`: When this group has active pages, hide the owner page's own view while keeping the owner page logically active.
+- `visible`: Keep the owner page's resolved view visible while pages in this group are active.
 
 Rules:
 
-- `ownerView` is required for page-owned groups.
-- `ownerView` is invalid for root-owned and group-owned groups.
+- `ownerVisibility` is required for page-owned groups.
+- `ownerVisibility` is invalid for root-owned and group-owned groups.
 - A hidden owner page remains active and still owns its groups.
-- If multiple active owned groups disagree about the same owner page, `hide` wins.
+- If multiple active owned groups disagree about the same owner page, `hidden` wins.
 
 Frame behavior should continue to resolve from active pages. If multiple active pages at the same ownership depth define the same frame override, keep the current runtime error behavior until a clearer group-level frame policy is designed.
 
@@ -461,7 +460,7 @@ Examples:
 
 ## Close Rules
 
-Do not add a `closable` flag for the first implementation. A page is user-closable only if the author wires a close control to it. Public `Navigator.closePage(pageId)` should be forgiving enough for Q-SYS button wiring and should not throw when closing the default page is a no-op.
+A page is user-closable only if the author wires a close control to it. Public `Navigator.closePage(pageId)` is forgiving enough for Q-SYS button wiring and does not throw when closing the default page is a no-op.
 
 Rules:
 
@@ -488,7 +487,7 @@ groupOwnerById[groupId]
 groupsOwnedByOwnerId[ownerId]
 pagesByGroupId[groupId]
 groupBehaviorById[groupId]
-groupOwnerViewById[groupId]
+groupOwnerVisibilityById[groupId]
 groupDefaultPagesById[groupId]
 groupAncestorsById[groupId]
 ownerKindByGroupId[groupId] -- "root", "group", or "page"
@@ -531,7 +530,7 @@ Runtime navigation should use only simple table lookups and small active-state w
 
 - Reconcile visibility:
   - collect active pages
-  - suppress owner page views for active page-owned groups whose `ownerView` is `hide`
+  - suppress owner page views for active page-owned groups whose `ownerVisibility` is `hidden`
   - resolve page views for the current access
   - resolve frame layers
   - apply UCI layer changes once
@@ -575,8 +574,8 @@ Validate during `Navigator.configure(...)`:
 - No ownership cycles exist.
 - Page ids and group ids are unique across both namespaces.
 - `root` is not used as a page id or group id.
-- `ownerView` is present and valid for page-owned groups.
-- `ownerView` is absent for root-owned and group-owned groups.
+- `ownerVisibility` is present and valid for page-owned groups.
+- `ownerVisibility` is absent for root-owned and group-owned groups.
 - `frameRoles`, when present, maps role names to valid page ids.
 - `frameOverrides`, when present, references declared frame roles.
 - `defaultPageIds`, when present, contains pages in the same group.
@@ -587,16 +586,7 @@ Validate during `Navigator.configure(...)`:
 - Unlocked pages have `views.default` or another valid unlocked access view.
 - Every view key is declared in `access.levels`.
 
-Do not validate or support these replaced fields:
-
-- `parentId`
-- `childDisplayMode`
-- `parentVisibility`
-- `defaultChildId`
-
-If any replaced field appears in config, fail validation with a clear error.
-
-## History Direction
+## History
 
 History should snapshot both active pages and active groups:
 
@@ -613,23 +603,4 @@ Rules:
 - Access changes clear history.
 - Keypad/session/access boundaries clear history.
 - Back/forward restores both active pages and active groups.
-- If a project later needs history exclusion, make that a group-level policy rather than a hardcoded page-id exception.
-
-## Implementation Plan
-
-Suggested order:
-
-1. Add validation and indexing for `pageGroups`, `pageGroup`, ownership, behavior, `ownerView`, and `defaultPageIds`.
-2. Change runtime state to track `activeGroupIds` plus `activePageIds`.
-3. Replace root/child open logic with group ancestry activation and group behavior enforcement.
-4. Replace `closeBranch` with close-page and close-group operations based on ownership.
-5. Implement group `ownerView`.
-6. Implement group `defaultPageIds`.
-7. Update access, locked, and keypad behavior to open authored locked/unlocked pages.
-8. Update history snapshots to include active groups.
-9. Remove validation and runtime support for `parentId`, `childDisplayMode`, `parentVisibility`, and `defaultChildId`.
-10. Update examples and user docs after behavior is verified.
-
-## Remaining Decisions
-
-- None at this point. Vanilla and Strawberry are the concrete example targets, and custom access levels are a core engine requirement.
+- If a project later needs history exclusion, that should be a group-level policy rather than a hardcoded page-id exception.
