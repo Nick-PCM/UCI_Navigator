@@ -120,6 +120,11 @@ local function viewForAccess(page, access)
     or (not isLockedAccess(access) and page.views[Navigator.Access.DEFAULT])
 end
 
+local function viewTableForAccess(views, access)
+  return views[access]
+    or (not isLockedAccess(access) and views[Navigator.Access.DEFAULT])
+end
+
 local function viewForPageId(pageId, access)
   local page = config.pages[pageId]
   return viewForAccess(page, access or effectiveAccessForPage(pageId))
@@ -147,6 +152,11 @@ local function collectConfiguredLayers()
     for _, layerNames in pairs(page.views) do
       addLayers(layers, layerNames)
     end
+    for _, roleViews in pairs(page.frameOverrides or {}) do
+      for _, layerNames in pairs(roleViews) do
+        addLayers(layers, layerNames)
+      end
+    end
   end
   return layers
 end
@@ -170,16 +180,50 @@ local function hiddenOwnerPageIds()
   return hidden
 end
 
+local function selectedFrameOverrides()
+  local selected = {}
+  for pageId in pairs(state.activePageIds) do
+    local page = config.pages[pageId]
+    for role, roleViews in pairs(page.frameOverrides or {}) do
+      local view = viewTableForAccess(roleViews, effectiveAccessForPage(pageId))
+      if view then
+        local depth = pageDepth(pageId)
+        local current = selected[role]
+        assert(not current or current.depth ~= depth,
+          "multiple active frame overrides for " .. role)
+        if not current or depth > current.depth then
+          selected[role] = {
+            pageId = pageId,
+            depth = depth,
+            view = view,
+          }
+        end
+      end
+    end
+  end
+  return selected
+end
+
 local function resolveDesiredLayers()
   local desired = {}
   local hidden = hiddenOwnerPageIds()
+  local frameOverrides = selectedFrameOverrides()
+  local hiddenFramePageIds = {}
+
+  for role in pairs(frameOverrides) do
+    local framePageId = config.frameRoles and config.frameRoles[role]
+    if framePageId then hiddenFramePageIds[framePageId] = true end
+  end
 
   for pageId in pairs(state.activePageIds) do
-    if not hidden[pageId] then
+    if not hidden[pageId] and not hiddenFramePageIds[pageId] then
       local view = viewForPageId(pageId)
       assert(view, pageId .. " is active but unavailable")
       addLayers(desired, view)
     end
+  end
+  for _, override in pairs(frameOverrides) do
+    addLayers(desired, override.view)
   end
   return desired
 end
@@ -678,6 +722,32 @@ local function validateControls(ownerId, controls, allowedKeys)
   end
 end
 
+local function validateFrameRoles(candidate)
+  if candidate.frameRoles == nil then return end
+  assert(type(candidate.frameRoles) == "table", "frameRoles must be a table")
+  for role, pageId in pairs(candidate.frameRoles) do
+    assert(type(role) == "string" and role ~= "",
+      "frameRoles contains an invalid role")
+    assert(type(pageId) == "string" and pageId ~= "",
+      "frameRoles." .. role .. " must be a page ID")
+    assert(candidate.pages[pageId],
+      "frameRoles." .. role .. " identifies unknown page " .. tostring(pageId))
+  end
+end
+
+local function validateFrameOverrides(pageId, frameOverrides, levels, frameRoles)
+  if frameOverrides == nil then return end
+  assert(type(frameOverrides) == "table",
+    pageId .. ".frameOverrides must be a table")
+  assert(type(frameRoles) == "table",
+    pageId .. ".frameOverrides requires frameRoles")
+  for role, roleViews in pairs(frameOverrides) do
+    assert(frameRoles[role],
+      pageId .. ".frameOverrides has unknown role " .. tostring(role))
+    validateViews(pageId .. ".frameOverrides." .. role, roleViews, levels)
+  end
+end
+
 local function validateAccess(access)
   assert(type(access) == "table", "access must be a table")
   assert(type(access.levels) == "table", "access.levels must be a table")
@@ -805,6 +875,7 @@ local function validateConfig(candidate)
   assert(type(candidate.pages) == "table", "pages must be a table")
 
   validateAccess(candidate.access)
+  validateFrameRoles(candidate)
   assert(candidate.pageGroups[LOCKED_GROUP], "lockedGroup is required")
   assert(candidate.pageGroups[UNLOCKED_GROUP], "unlockedGroup is required")
 
@@ -823,6 +894,8 @@ local function validateConfig(candidate)
     assert(candidate.pageGroups[page.pageGroup],
       pageId .. " has unknown pageGroup " .. tostring(page.pageGroup))
     validateViews(pageId, page.views, candidate.access.levels)
+    validateFrameOverrides(pageId, page.frameOverrides,
+      candidate.access.levels, candidate.frameRoles)
     if page.controls then
       validateControls(pageId .. ".controls", page.controls, pageControlKeys)
       if not candidate.access.keypadRequired then

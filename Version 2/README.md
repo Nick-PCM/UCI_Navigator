@@ -18,7 +18,7 @@ Navigator has two separate primitives:
 - A **page** is visible content. It owns views, Q-SYS layer names, and controls.
 - A **page group** is lifecycle policy. It controls how its direct members coexist.
 
-Pages do not directly contain pages. A page belongs to one group, and a page may own groups.
+A page belongs to one page group. A page can also own page groups, which is how page-specific navigation is modeled.
 
 ```text
 pageGroup -> page
@@ -65,6 +65,36 @@ audioGroup = {
 
 - `ownerView = "keep"` keeps the owner page visible behind owned pages.
 - `ownerView = "hide"` hides the owner page view while owned pages are active.
+
+## Frame Roles And Overrides
+
+Frame roles name standard frame pages that other pages can temporarily replace.
+
+```lua
+frameRoles = {
+  footer = "footerPage",
+}
+```
+
+A page can override a frame role while it is active:
+
+```lua
+audioSettingsPage = {
+  pageGroup = "audioGroup",
+  views = {
+    default = { "Audio Settings" },
+  },
+  frameOverrides = {
+    footer = {
+      default = { "Audio Settings Footer" },
+    },
+  },
+}
+```
+
+When `audioSettingsPage` is active, Navigator hides the standard `footerPage` view and shows `Audio Settings Footer`. Closing the page restores the standard footer.
+
+Frame overrides use the same access-keyed view shape as page `views`, so custom access can provide its own footer layer.
 
 ## Standard Groups
 

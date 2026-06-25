@@ -59,6 +59,10 @@ Navigator.configure({
     forward = Controls["Forward"],
   },
 
+  frameRoles = {
+    footer = "footerPage",
+  },
+
   pageGroups = {
     groupId = {
       owner = "root", -- or another group id, or a page id
@@ -74,6 +78,11 @@ Navigator.configure({
       pageGroup = "groupId",
       views = {
         default = { "Layer Name" },
+      },
+      frameOverrides = {
+        footer = {
+          default = { "Replacement Footer Layer" },
+        },
       },
       controls = {
         open = Controls["Open Page"],
@@ -93,6 +102,8 @@ Navigator.configure({
 - `root`: Reserved owner name for top-level groups.
 - `defaultPageIds`: Optional pages to activate when a group is activated without a more specific target.
 - `ownerView`: For page-owned groups only, controls whether the owner page's own view remains visible.
+- `frameRoles`: Names standard frame pages that active pages may override.
+- `frameOverrides`: Page-local replacement views for named frame roles.
 
 Accepted group behavior values:
 
@@ -376,6 +387,41 @@ Rules:
 
 Frame behavior should continue to resolve from active pages. If multiple active pages at the same ownership depth define the same frame override, keep the current runtime error behavior until a clearer group-level frame policy is designed.
 
+## Frame Overrides
+
+Frame roles let active pages replace named frame pages without splitting every frame component into its own group.
+
+```lua
+frameRoles = {
+  footer = "footerPage",
+}
+```
+
+Any active page can override a role:
+
+```lua
+audioSettingsPage = {
+  pageGroup = "audioGroup",
+  views = {
+    default = { "Audio Settings" },
+  },
+  frameOverrides = {
+    footer = {
+      default = { "Audio Settings Footer" },
+    },
+  },
+}
+```
+
+Rules:
+
+- `frameRoles` maps role names to the standard frame page ids.
+- `frameOverrides` uses the same access-keyed layer-list shape as `views`.
+- When an active page overrides a frame role, Navigator hides the role's standard frame page view and shows the override layers.
+- The deepest active page override wins.
+- If multiple active pages at the same depth override the same role, Navigator errors instead of guessing.
+- Access-level fallback works the same as page `views`: custom access falls back to `default`; `locked` does not.
+
 ## Default Pages
 
 Groups may define default pages:
@@ -531,6 +577,8 @@ Validate during `Navigator.configure(...)`:
 - `root` is not used as a page id or group id.
 - `ownerView` is present and valid for page-owned groups.
 - `ownerView` is absent for root-owned and group-owned groups.
+- `frameRoles`, when present, maps role names to valid page ids.
+- `frameOverrides`, when present, references declared frame roles.
 - `defaultPageIds`, when present, contains pages in the same group.
 - `access.levels.locked.homePageId` identifies a page in `lockedGroup`.
 - `access.levels.default.homePageId` identifies a page under `unlockedGroup`.

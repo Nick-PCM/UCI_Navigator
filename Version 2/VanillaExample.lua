@@ -41,6 +41,10 @@ Navigator.configure({
     forward = Controls["Forward"],
   },
 
+  frameRoles = {
+    footer = "footerPage",
+  },
+
   pageGroups = {
     lockedGroup = {
       owner = "root",
@@ -82,10 +86,11 @@ Navigator.configure({
       defaultPageIds = { "audioRoutingPage" },
     },
 
-    videoModalGroup = {
+    videoGroup = {
       owner = "videoPage",
-      behavior = "independent",
+      behavior = "interlocked",
       ownerView = "keep",
+      defaultPageIds = { "videoRoutingPage" }
     },
 
     videoReplacementGroup = {
@@ -179,6 +184,11 @@ Navigator.configure({
       views = {
         default = { "Audio Settings" },
       },
+      frameOverrides = {
+        footer = {
+          default = { "Audio Settings Footer" },
+        },
+      },
       controls = {
         open = Controls["Open Audio Settings"],
       },
@@ -195,7 +205,7 @@ Navigator.configure({
     },
 
     videoRoutingPage = {
-      pageGroup = "videoModalGroup",
+      pageGroup = "videoGroup",
       views = {
         default = { "Video Routing" },
       },
@@ -206,7 +216,7 @@ Navigator.configure({
     },
 
     videoSettingsPage = {
-      pageGroup = "videoModalGroup",
+      pageGroup = "videoGroup",
       views = {
         default = { "Video Settings" },
       },
