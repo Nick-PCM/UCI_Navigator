@@ -720,7 +720,6 @@ end
 local pageControlKeys = {
   open = true,
   close = true,
-  openKeypad = true,
 }
 
 -- Supported global access control aliases.
@@ -753,6 +752,50 @@ local function validateAccessName(ownerId, access)
     ownerId .. " has an invalid access level")
   assert(access == string.lower(access),
     ownerId .. " access levels must be lowercase")
+end
+
+-- Normalizes shorthand layer declarations into access-keyed layer lists.
+local function normalizeViews(ownerId, views, defaultAccess)
+  defaultAccess = defaultAccess or Navigator.Access.DEFAULT
+  if type(views) == "string" then
+    return { [defaultAccess] = { views } }
+  end
+  assert(type(views) == "table", ownerId .. " requires views")
+  if views[1] ~= nil then
+    return { [defaultAccess] = views }
+  end
+
+  local normalized = {}
+  for access, layerNames in pairs(views) do
+    if type(layerNames) == "string" then
+      normalized[access] = { layerNames }
+    else
+      normalized[access] = layerNames
+    end
+  end
+  return normalized
+end
+
+-- Normalizes page authoring aliases before validation and indexing.
+local function normalizeConfig(candidate)
+  candidate.uci.transition = candidate.uci.transition or "none"
+  for pageId, page in pairs(candidate.pages) do
+    page.views = normalizeViews(pageId, page.views)
+    if page.overrides ~= nil then
+      assert(page.frameOverrides == nil,
+        pageId .. " cannot define both overrides and frameOverrides")
+      page.frameOverrides = page.overrides
+      page.overrides = nil
+    end
+    if page.frameOverrides then
+      assert(type(page.frameOverrides) == "table",
+        pageId .. ".overrides must be a table")
+      for role, roleViews in pairs(page.frameOverrides) do
+        page.frameOverrides[role] =
+          normalizeViews(pageId .. ".frameOverrides." .. role, roleViews)
+      end
+    end
+  end
 end
 
 -- Validates that a page or override has usable access-keyed layer lists.
@@ -945,6 +988,7 @@ local function validateConfig(candidate)
     "uci.transition must be a non-empty string")
   assert(type(candidate.pageGroups) == "table", "pageGroups must be a table")
   assert(type(candidate.pages) == "table", "pages must be a table")
+  normalizeConfig(candidate)
 
   validateAccess(candidate.access)
   validateFrameRoles(candidate)
@@ -970,10 +1014,6 @@ local function validateConfig(candidate)
       candidate.access.levels, candidate.frameRoles)
     if page.controls then
       validateControls(pageId .. ".controls", page.controls, pageControlKeys)
-      if not candidate.access.keypadRequired then
-        assert(page.controls.openKeypad == nil,
-          pageId .. ".controls.openKeypad requires access.keypadRequired = true")
-      end
     end
   end
 
@@ -1134,12 +1174,6 @@ local function bindControls()
         control.EventHandler = function()
           if shouldLog("controls") then log("controls", "close " .. pageId .. " pressed") end
           Navigator.closePage(pageId)
-        end
-      end)
-      forEachControl(controls.openKeypad, function(control)
-        control.EventHandler = function()
-          if shouldLog("controls") then log("controls", "open keypad pressed") end
-          Navigator.openPage(config.access.keypadPageId)
         end
       end)
     end

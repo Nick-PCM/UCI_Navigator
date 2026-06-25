@@ -6,10 +6,9 @@
 -- advanced-only page examples.
 
 Navigator.configure({
-  -- Q-SYS UCI target and transition style for layer visibility changes.
+  -- Q-SYS UCI target for layer visibility changes.
   uci = {
     pageName = "Main", -- Q-SYS UCI page that contains the controlled layers.
-    transition = "none", -- Q-SYS layer transition used when showing or hiding layers.
   },
 
   -- Advanced is declared without a homePageId; default remains the unlocked home.
@@ -27,7 +26,7 @@ Navigator.configure({
 
   -- Global controls that change or mirror access state.
   accessControls = {
-    state = Controls["Access State"], -- String control that mirrors the current access level.
+    state = Controls["Access State"], -- String control the external keypad module writes to set UCI accessibility.
     request = Controls["Access Request"], -- Button that opens the keypad or requests default access.
     lock = Controls["Lock Request"], -- Button that returns Navigator to locked access.
     activityPulse = Controls["Activity Pulse"], -- Pulse control that restarts active access timers.
@@ -44,7 +43,7 @@ Navigator.configure({
     footer = "footerPage",
   },
 
-  -- Page groups match vanilla so access behavior is the only new variable.
+  -- Navigation ownership tree: owner places each group; behavior decides whether its pages replace or coexist.
   pageGroups = {
     -- Locked pages interlock: splash and keypad replace each other.
     lockedGroup = {
@@ -115,9 +114,6 @@ Navigator.configure({
       views = {
         locked = { "Splash" },
       },
-      controls = {
-        openKeypad = Controls["Open Keypad"],
-      },
     },
 
     -- Keypad is the configured locked keypad target.
@@ -127,6 +123,7 @@ Navigator.configure({
         locked = { "Keypad" },
       },
       controls = {
+        open = Controls["Open Keypad"],
         close = Controls["Close Keypad"],
       },
     },
@@ -134,30 +131,24 @@ Navigator.configure({
     -- Frame pages without advanced views fall back to default when advanced.
     backgroundPage = {
       pageGroup = "frameGroup",
-      views = {
-        default = { "Background" },
-      },
+      views = "Background",
     },
 
     headerPage = {
       pageGroup = "frameGroup",
-      views = {
-        default = { "Header" },
-      },
+      views = "Header",
     },
 
     footerPage = {
       pageGroup = "frameGroup",
-      views = {
-        default = { "Footer" },
-      },
+      views = "Footer",
     },
 
     -- Navigation overlays an advanced layer on top of the default layer.
     navPage = {
       pageGroup = "frameGroup",
       views = {
-        default = { "Navigation" },
+        default = "Navigation",
         advanced = { "Navigation", "Navigation Advanced" },
       },
     },
@@ -166,7 +157,7 @@ Navigator.configure({
     homepage = {
       pageGroup = "mainGroup",
       views = {
-        default = { "Home" },
+        default = "Home",
         advanced = { "Home", "Home Advanced" },
       },
       controls = {
@@ -178,8 +169,8 @@ Navigator.configure({
     audioPage = {
       pageGroup = "mainGroup",
       views = {
-        default = { "Audio" },
-        advanced = { "Audio Advanced" },
+        default = "Audio",
+        advanced = "Audio Advanced",
       },
       controls = {
         open = Controls["Open Audio Page"],
@@ -190,7 +181,7 @@ Navigator.configure({
     audioRoutingPage = {
       pageGroup = "audioGroup",
       views = {
-        default = { "Audio Routing" },
+        default = "Audio Routing",
         advanced = { "Audio Routing", "Audio Routing Advanced" },
       },
       controls = {
@@ -202,11 +193,11 @@ Navigator.configure({
     audioSettingsPage = {
       pageGroup = "audioGroup",
       views = {
-        advanced = { "Audio Settings Advanced" },
+        advanced = "Audio Settings Advanced",
       },
-      frameOverrides = {
+      overrides = {
         footer = {
-          advanced = { "Audio Settings Footer" },
+          advanced = "Audio Settings Footer",
         },
       },
       controls = {
@@ -217,9 +208,7 @@ Navigator.configure({
     -- Video has no advanced view, so it falls back to default.
     videoPage = {
       pageGroup = "mainGroup",
-      views = {
-        default = { "Video" },
-      },
+      views = "Video",
       controls = {
         open = Controls["Open Video Page"],
       },
@@ -229,7 +218,7 @@ Navigator.configure({
     videoRoutingPage = {
       pageGroup = "videoGroup",
       views = {
-        default = { "Video Routing" },
+        default = "Video Routing",
         advanced = { "Video Routing", "Video Routing Advanced" },
       },
       controls = {
@@ -241,9 +230,7 @@ Navigator.configure({
     -- Video settings has only a default view, so advanced falls back to it.
     videoSettingsPage = {
       pageGroup = "videoGroup",
-      views = {
-        default = { "Video Settings" },
-      },
+      views = "Video Settings",
       controls = {
         open = Controls["Open Video Settings"],
         close = Controls["Close Video Settings"],
@@ -253,9 +240,7 @@ Navigator.configure({
     -- Replacement page inherits default behavior for advanced access.
     videoTestPage = {
       pageGroup = "videoReplacementGroup",
-      views = {
-        default = { "Video Test" },
-      },
+      views = "Video Test",
       controls = {
         open = Controls["Open Video Test"],
         close = Controls["Close Video Test"],
@@ -265,9 +250,7 @@ Navigator.configure({
     -- Independent system page shown over the current unlocked state.
     powerPage = {
       pageGroup = "systemGroup",
-      views = {
-        default = { "Power Page" },
-      },
+      views = "Power Page",
       controls = {
         open = Controls["Open Power"],
         close = Controls["Close Power"],
@@ -277,9 +260,7 @@ Navigator.configure({
     -- Another independent system page.
     helpPage = {
       pageGroup = "systemGroup",
-      views = {
-        default = { "Help Page" },
-      },
+      views = "Help Page",
       controls = {
         open = Controls["Open Help"],
         close = Controls["Close Help"],

@@ -29,7 +29,7 @@ Navigator compiles the ownership tree once during `Navigator.configure(...)`, th
 Navigator.configure({
   uci = {
     pageName = "Main",
-    transition = "none",
+    -- transition defaults to "none" when omitted
   },
 
   access = {
@@ -74,13 +74,9 @@ Navigator.configure({
   pages = {
     pageId = {
       pageGroup = "groupId",
-      views = {
-        default = { "Layer Name" },
-      },
-      frameOverrides = {
-        footer = {
-          default = { "Replacement Footer Layer" },
-        },
+      views = "Layer Name",
+      overrides = {
+        footer = "Replacement Footer Layer",
       },
       controls = {
         open = Controls["Open Page"],
@@ -94,14 +90,19 @@ Navigator.configure({
 ## Vocabulary
 
 - `pageGroups`: Declares lifecycle containers.
+- `pages`: Declares visible UCI surfaces and their layers, controls, and group membership.
 - `pageGroup`: Assigns one page to one group.
 - `owner`: Names the lifecycle owner of a group.
 - `behavior`: Defines how a group's direct members coexist.
 - `root`: Reserved owner name for top-level groups.
 - `defaultPageIds`: Optional pages to activate when a group is activated without a more specific target.
 - `ownerVisibility`: For page-owned groups only, controls whether the owner page's own view remains visible.
+- `views`: Q-SYS layer names for a page. A string is shorthand for a default-access layer.
+- `controls`: Q-SYS controls wired to a page action.
+- `access`: Declares locked, default, and custom access behavior.
+- `levels`: The named access levels available to page views.
 - `frameRoles`: Names standard frame pages that active pages may override.
-- `frameOverrides`: Page-local replacement views for named frame roles.
+- `overrides`: Page-local replacement views for named frame roles.
 
 Accepted group behavior values:
 
@@ -201,9 +202,6 @@ pages = {
     views = {
       locked = { "Splash" },
     },
-    controls = {
-      openKeypad = Controls["Open Keypad"],
-    },
   },
 
   keypadPage = {
@@ -212,6 +210,7 @@ pages = {
       locked = { "Keypad" },
     },
     controls = {
+      open = Controls["Open Keypad"],
       close = Controls["Keypad Close"],
     },
   },
@@ -267,7 +266,7 @@ Example:
 audioPage = {
   pageGroup = "mainGroup",
   views = {
-    default = { "Audio" },
+    default = "Audio",
     advanced = { "Audio", "Audio Advanced" },
   },
 }
@@ -401,13 +400,9 @@ Any active page can override a role:
 ```lua
 audioSettingsPage = {
   pageGroup = "audioGroup",
-  views = {
-    default = { "Audio Settings" },
-  },
-  frameOverrides = {
-    footer = {
-      default = { "Audio Settings Footer" },
-    },
+  views = "Audio Settings",
+  overrides = {
+    footer = "Audio Settings Footer",
   },
 }
 ```
@@ -415,7 +410,7 @@ audioSettingsPage = {
 Rules:
 
 - `frameRoles` maps role names to the standard frame page ids.
-- `frameOverrides` uses the same access-keyed layer-list shape as `views`.
+- `overrides` uses the same shorthand as `views`; use access-keyed tables when a replacement differs by access level.
 - When an active page overrides a frame role, Navigator hides the role's standard frame page view and shows the override layers.
 - The deepest active page override wins.
 - If multiple active pages at the same depth override the same role, Navigator errors instead of guessing.
@@ -545,7 +540,6 @@ Keep the existing page-local control idea:
 controls = {
   open = Controls["Audio Nav"],
   close = Controls["Audio Close"],
-  openKeypad = Controls["Open Keypad"],
 }
 ```
 
@@ -553,7 +547,6 @@ Rules:
 
 - `controls.open` calls `Navigator.openPage(pageId)`.
 - `controls.close` calls `Navigator.closePage(pageId)`.
-- `controls.openKeypad` opens the configured keypad page.
 - Toggle nav controls should be forced `Boolean = true` when pressed and updated from active page state during reconciliation.
 - Trigger controls should simply execute their action when their event handler fires.
 - Control fields may still accept a single Q-SYS control or a list of equivalent controls.
@@ -577,7 +570,7 @@ Validate during `Navigator.configure(...)`:
 - `ownerVisibility` is present and valid for page-owned groups.
 - `ownerVisibility` is absent for root-owned and group-owned groups.
 - `frameRoles`, when present, maps role names to valid page ids.
-- `frameOverrides`, when present, references declared frame roles.
+- `overrides`, when present, references declared frame roles.
 - `defaultPageIds`, when present, contains pages in the same group.
 - `access.levels.locked.homePageId` identifies a page in `lockedGroup`.
 - `access.levels.default.homePageId` identifies a page under `unlockedGroup`.

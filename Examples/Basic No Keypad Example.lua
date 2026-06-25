@@ -5,10 +5,9 @@
 -- keypad. Pressing the access request control while locked opens default access.
 
 Navigator.configure({
-  -- Q-SYS UCI target and transition style for layer visibility changes.
+  -- Q-SYS UCI target for layer visibility changes.
   uci = {
     pageName = "Main", -- Q-SYS UCI page that contains the controlled layers.
-    transition = "none", -- Q-SYS layer transition used when showing or hiding layers.
   },
 
   -- Turn individual print() log categories on or off.
@@ -32,7 +31,7 @@ Navigator.configure({
 
   -- Global controls that change or mirror access state.
   accessControls = {
-    state = Controls["Access State"], -- String control that mirrors the current access level.
+    state = Controls["Access State"], -- String control the external keypad module writes to set UCI accessibility.
     request = Controls["Access Request"], -- Button that opens the keypad or requests default access.
     lock = Controls["Lock Request"], -- Button that returns Navigator to locked access.
     activityPulse = Controls["Activity Pulse"], -- Pulse control that restarts active access timers.
@@ -49,7 +48,7 @@ Navigator.configure({
     footer = "footerPage",
   },
 
-  -- Page groups define ownership and coexistence behavior.
+  -- Navigation ownership tree: owner places each group; behavior decides whether its pages replace or coexist.
   pageGroups = {
     -- Locked has only the splash page in this no-keypad example.
     lockedGroup = {
@@ -126,38 +125,28 @@ Navigator.configure({
     -- Frame pages live under frameGroup and come up with unlocked access.
     backgroundPage = {
       pageGroup = "frameGroup",
-      views = {
-        default = { "Background" },
-      },
+      views = "Background",
     },
 
     headerPage = {
       pageGroup = "frameGroup",
-      views = {
-        default = { "Header" },
-      },
+      views = "Header",
     },
 
     footerPage = {
       pageGroup = "frameGroup",
-      views = {
-        default = { "Footer" },
-      },
+      views = "Footer",
     },
 
     navPage = {
       pageGroup = "frameGroup",
-      views = {
-        default = { "Navigation" },
-      },
+      views = "Navigation",
     },
 
     -- The default unlocked main page.
     homepage = {
       pageGroup = "mainGroup",
-      views = {
-        default = { "Home" },
-      },
+      views = "Home",
       controls = {
         open = Controls["Open Home Page"],
       },
@@ -166,9 +155,7 @@ Navigator.configure({
     -- Main audio page owns an interlocked audioGroup below it.
     audioPage = {
       pageGroup = "mainGroup",
-      views = {
-        default = { "Audio" },
-      },
+      views = "Audio",
       controls = {
         open = Controls["Open Audio Page"],
       },
@@ -177,9 +164,7 @@ Navigator.configure({
     -- Default audio subpage.
     audioRoutingPage = {
       pageGroup = "audioGroup",
-      views = {
-        default = { "Audio Routing" },
-      },
+      views = "Audio Routing",
       controls = {
         open = Controls["Open Audio Routing"],
       },
@@ -188,13 +173,9 @@ Navigator.configure({
     -- Audio settings replaces the standard footer while active.
     audioSettingsPage = {
       pageGroup = "audioGroup",
-      views = {
-        default = { "Audio Settings" },
-      },
-      frameOverrides = {
-        footer = {
-          default = { "Audio Settings Footer" },
-        },
+      views = "Audio Settings",
+      overrides = {
+        footer = "Audio Settings Footer",
       },
       controls = {
         open = Controls["Open Audio Settings"],
@@ -204,9 +185,7 @@ Navigator.configure({
     -- Main video page owns visible subpages and hidden replacement pages.
     videoPage = {
       pageGroup = "mainGroup",
-      views = {
-        default = { "Video" },
-      },
+      views = "Video",
       controls = {
         open = Controls["Open Video Page"],
       },
@@ -215,9 +194,7 @@ Navigator.configure({
     -- Video subpages use close controls, but closing the default returns to it.
     videoRoutingPage = {
       pageGroup = "videoGroup",
-      views = {
-        default = { "Video Routing" },
-      },
+      views = "Video Routing",
       controls = {
         open = Controls["Open Video Routing"],
         close = Controls["Close Video Routing"],
@@ -227,9 +204,7 @@ Navigator.configure({
     -- Second video subpage interlocked with video routing.
     videoSettingsPage = {
       pageGroup = "videoGroup",
-      views = {
-        default = { "Video Settings" },
-      },
+      views = "Video Settings",
       controls = {
         open = Controls["Open Video Settings"],
         close = Controls["Close Video Settings"],
@@ -239,9 +214,7 @@ Navigator.configure({
     -- Replacement page: hides videoPage until closed.
     videoTestPage = {
       pageGroup = "videoReplacementGroup",
-      views = {
-        default = { "Video Test" },
-      },
+      views = "Video Test",
       controls = {
         open = Controls["Open Video Test"],
         close = Controls["Close Video Test"],
@@ -251,9 +224,7 @@ Navigator.configure({
     -- Independent system page shown over the current unlocked state.
     powerPage = {
       pageGroup = "systemGroup",
-      views = {
-        default = { "Power" },
-      },
+      views = "Power",
       controls = {
         open = Controls["Open Power"],
         close = Controls["Close Power"],
@@ -263,9 +234,7 @@ Navigator.configure({
     -- Another independent system page.
     helpPage = {
       pageGroup = "systemGroup",
-      views = {
-        default = { "Help" },
-      },
+      views = "Help",
       controls = {
         open = Controls["Open Help"],
         close = Controls["Close Help"],

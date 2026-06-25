@@ -83,20 +83,16 @@ A page can override a frame role while it is active:
 ```lua
 audioSettingsPage = {
   pageGroup = "audioGroup",
-  views = {
-    default = { "Audio Settings" },
-  },
-  frameOverrides = {
-    footer = {
-      default = { "Audio Settings Footer" },
-    },
+  views = "Audio Settings",
+  overrides = {
+    footer = "Audio Settings Footer",
   },
 }
 ```
 
 When `audioSettingsPage` is active, Navigator hides the standard `footerPage` view and shows `Audio Settings Footer`. Closing the page restores the standard footer.
 
-Frame overrides use the same access-keyed view shape as page `views`, so custom access can provide its own footer layer.
+Overrides use the same shorthand as page `views`, so custom access can provide its own footer layer.
 
 ## Standard Groups
 
@@ -138,19 +134,19 @@ pageGroups = {
 
 ## Pages
 
-A page declares its group, access-keyed views, and optional controls:
+A page declares its group, views, and optional controls:
 
 ```lua
 audioPage = {
   pageGroup = "mainGroup",
-  views = {
-    default = { "Audio" },
-  },
+  views = "Audio",
   controls = {
     open = Controls["Open Audio Page"],
   },
 }
 ```
+
+`views = "Audio"` is shorthand for `views = { default = { "Audio" } }`. Use an access-keyed table when a page needs locked or custom access views.
 
 Layer names in `views` are Q-SYS UCI layer names. Page ids and group ids are Navigator authoring ids.
 
@@ -197,7 +193,6 @@ Supported page controls:
 
 - `open`: opens the page.
 - `close`: closes the page.
-- `openKeypad`: opens the configured keypad page.
 
 Control fields can be a single Q-SYS control or a list of equivalent controls. Use a single control when there is one button for the action:
 
@@ -225,7 +220,7 @@ Open controls are treated as toggle-style navigation controls: when pressed, Nav
 Access controls:
 
 - `accessControls.state`: string bridge for external access modules.
-- `accessControls.request`: access request/downgrade/open-keypad action.
+- `accessControls.request`: requests access, opening the keypad first when keypad access is required.
 - `accessControls.lock`: return to locked access.
 - `accessControls.activityPulse`: restarts active timers.
 
