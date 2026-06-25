@@ -10,16 +10,16 @@ local config = Navigator.compile({
 Navigator.apply(config)
 ```
 
-`Navigator.compile(...)` converts authored groups, pages, regions, references, access entries, and control-name strings into the native runtime model. `Navigator.apply(...)` validates and installs that model.
+`Navigator.compile(...)` converts authored groups, pages, regions, references, access entries, and control-name strings into the runtime model. `Navigator.apply(...)` validates and installs that model.
 
 ## Runtime Primitives
 
 Navigator runtime state is built from:
 
-- `pageGroups`: lifecycle containers with an owner and behavior.
+- `groups`: lifecycle containers with an owner and behavior.
 - `pages`: visible navigable states with layer views, controls, and optional region fills.
 - `regions`: owner-scoped presentation areas with default layer views.
-- `access`: locked/default/custom access behavior.
+- `access`: locked, user, and admin access behavior.
 
 A page belongs to exactly one group. A group is owned by `root`, another group, or a page. A region is owned by `root`, a group, or a page.
 
@@ -70,7 +70,7 @@ Rules:
 - `locked` is required.
 - One unlocked level should set `default = true`.
 - Locked access does not fall back to default content.
-- Unlocked custom levels fall back to the configured default level when a page or region does not define custom content.
+- `admin` falls back to `user` when a page or region does not define admin content.
 - `keypad`, when present, must reference a locked page.
 - Access changes clear history.
 
@@ -100,8 +100,7 @@ Strings become normal page or region layer views. Callable region references cre
 On each navigation change, Navigator resolves desired layers in this order:
 
 1. Active pages contribute their current access view unless hidden by an active page-owned group.
-2. Active native frame overrides are applied for native configs that still use `frameRoles`.
-3. Active regions contribute either their selected fill or their default content.
+2. Active regions contribute either their selected fill or their default content.
 
 For each active region:
 
@@ -146,7 +145,7 @@ Navigator.open(config.pages.audio)
 Navigator.close(config.pages.audio)
 ```
 
-String ids still work through `Navigator.openPage("audio")` and `Navigator.closePage("audio")` for native or diagnostic code.
+String ids still work through `Navigator.openPage("audio")` and `Navigator.closePage("audio")` for diagnostic code.
 
 ## Validation
 
@@ -163,4 +162,4 @@ Navigator validates before applying a config:
 - invalid access definitions
 - same-depth active region fill conflicts at runtime
 
-`Navigator.apply(...)` can install either a compiled config or a native config with `pageGroups` and `pages`. New project authoring should use `Navigator.compile(...)`.
+`Navigator.apply(...)` installs compiled configs. New project authoring should use `Navigator.compile(...)`.

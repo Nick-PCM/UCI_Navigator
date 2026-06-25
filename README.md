@@ -18,10 +18,9 @@ Navigator.apply(config)
 
 - `Navigator.lua`: the navigation module.
 - `Navigator.md`: deeper model and runtime rules.
-- `authoringExample.lua`: target authoring example using `compile(...)`.
-- `Examples/Basic Keypad Example.lua`: native runtime config with keypad access.
-- `Examples/Basic No Keypad Example.lua`: native runtime config without keypad access.
-- `Examples/Advanced Access Example.lua`: native runtime config with a custom access level.
+- `Examples/Basic Keypad Example.lua`: authored config with keypad access.
+- `Examples/Basic No Keypad Example.lua`: authored config without keypad access.
+- `Examples/Advanced Access Example.lua`: authored config with a custom access level.
 
 ## Authoring Model
 
@@ -59,7 +58,7 @@ mode = independent
 
 ## Access
 
-Top-level `access` declares access levels. `locked` is reserved for locked access. One unlocked level should set `default = true`; that level becomes the default target for bare content and normal access requests.
+Top-level `access` declares access levels. The examples use `locked`, `user`, and `admin`. `locked` is reserved for locked access, and `user` sets `default = true` so it becomes the default target for bare content and normal access requests.
 
 ```lua
 access = {
@@ -133,6 +132,6 @@ end
 
 `Navigator.close(config.pages.audio)` closes the same page.
 
-## Native Configs
+## Runtime Config
 
-`Navigator.apply(...)` can also accept a native runtime config with `pageGroups` and `pages`. The active files in `Examples/` show that lower-level shape. New projects should prefer `Navigator.compile(...)` unless they need direct access to the runtime representation.
+The compiled config exposes resolved handles under `config.pages`, `config.groups`, and `config.regions`. Treat that compiled table as Navigator's runtime config and pass it directly to `Navigator.apply(...)`.

@@ -21,19 +21,11 @@ local config = Navigator.compile({
 Navigator.apply(config)
 ```
 
-`Navigator.compile(...)` expands the authored project into native Navigator configuration.
+`Navigator.compile(...)` expands the authored project into Navigator's runtime configuration.
 
-`Navigator.apply(...)` installs native Navigator configuration into the active runtime.
+`Navigator.apply(...)` installs that runtime configuration into the active runtime.
 
-The native path is:
-
-```lua
-Navigator.apply({
-  -- native Navigator config
-})
-```
-
-`Navigator.compile(...)` should return a native config table that also exposes resolved typed handles for custom script code:
+`Navigator.compile(...)` should return a runtime config table that also exposes resolved typed handles for custom script code:
 
 ```lua
 local config = Navigator.compile({
@@ -286,9 +278,7 @@ Runtime behavior should be:
 4. Prefer the fill from the most specific active page.
 5. If two equally specific active pages fill the same region, error instead of guessing.
 
-This generalizes the current frame override behavior.
-
-Prefer implementing regions as a real runtime concept. An initial implementation may compile regions into current `frameRoles` / `frameOverrides` internals only as a temporary stepping stone if that is clearly lower risk. The public authoring model should be regions, not frame roles.
+Regions are a real runtime concept. The public authoring model should use regions for default presentation areas and page-specific fills.
 
 ## Access
 
@@ -363,7 +353,7 @@ Navigator.open(config.pages.audio)
 Navigator.close(config.pages.audio)
 ```
 
-String IDs should remain supported only if needed for native compatibility, not as the preferred authoring style:
+String IDs may remain available for diagnostic or low-level script use, but handles are the preferred authoring style:
 
 ```lua
 Navigator.open("audio")
@@ -371,17 +361,17 @@ Navigator.open("audio")
 
 ## Current Example Shape
 
-The current preferred ordering in `authoringExample.lua` is:
+The current preferred ordering in `Examples/Basic Keypad Example.lua` is:
 
 ```text
 gate
-access
+accessGate
 session
 regions
 tools
 system
-audio
-video
+audioSubpages
+videoSubpages
 videoReplacement
 ```
 
@@ -390,7 +380,7 @@ Conceptual tree:
 ```text
 root
   gate
-    access
+    accessGate
       splash
       keypad
 
@@ -410,11 +400,11 @@ root
       audio
       video
 
-      audio
+      audioSubpages
         audioRouting
         audioSettings
 
-      video
+      videoSubpages
         videoRouting
         videoSettings
 

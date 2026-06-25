@@ -6,7 +6,7 @@ Use this prompt to start the next implementation pass.
 
 We are in the `UCI_Navigator` repo. Ignore everything in the `old/` folder.
 
-Implement the authoring API described in `AUTHORING_SPEC.md`, using `authoringExample.lua` as the target authoring example.
+Implement the authoring API described in `AUTHORING_SPEC.md`, using `Examples/Basic Keypad Example.lua` as the target authoring example.
 
 Current Navigator is not in production. Do not treat existing public API shapes as compatibility requirements. It is acceptable to remove or reshape legacy/native authoring forms if that makes the implementation clearer. Prefer making Navigator's internal representation as close to the new authoring model as reasonable, instead of building a large compatibility compiler that translates into an awkward older shape.
 
@@ -67,13 +67,13 @@ Keep changes pragmatic and scoped. Prefer adapting existing normalization/valida
 
 Suggested first pass:
 
-1. Read `AUTHORING_SPEC.md`, `authoringExample.lua`, `Navigator.lua`, and the active examples in `Examples/`.
+1. Read `AUTHORING_SPEC.md`, `Examples/Basic Keypad Example.lua`, `Navigator.lua`, and the active examples in `Examples/`.
 2. Identify the current native config shape and where `configure` performs normalization/validation.
 3. Decide whether `apply` should reuse/replace the current configure implementation.
 4. Implement compile-time marker objects for `group`, `page`, `region`, typed refs, mode sentinels, and region fill values.
 5. Implement `Navigator.compile(...)` to emit native config plus `config.pages`, `config.groups`, and `config.regions` handles.
 6. Implement `Navigator.apply(...)`.
-7. Validate `authoringExample.lua` with a mocked Q-SYS environment.
+7. Validate `Examples/Basic Keypad Example.lua` with a mocked Q-SYS environment.
 8. Update and validate the active examples against the new API.
 
-Do not update public README/docs broadly until the implementation shape is proven. Keep `AUTHORING_SPEC.md` and `authoringExample.lua` as the implementation source of truth during the first pass.
+Do not update public README/docs broadly until the implementation shape is proven. Keep `AUTHORING_SPEC.md` and `Examples/Basic Keypad Example.lua` as the implementation source of truth during the first pass.

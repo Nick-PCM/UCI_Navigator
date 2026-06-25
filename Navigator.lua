@@ -203,7 +203,7 @@ end
 
 -- Identifies pages that should resolve locked views regardless of active access.
 local function pageIsInLockedGroup(pageId)
-  return groupIsUnder(indexes.pageGroupByPageId[pageId],
+  return groupIsUnder(indexes.groupByPageId[pageId],
     config.access.lockedGroupId)
 end
 
@@ -219,7 +219,7 @@ local function viewForAccess(page, access)
     or (not isLockedAccess(access) and page.views[config.access.defaultLevelId])
 end
 
--- Resolves an access-keyed layer table, used by frame overrides.
+-- Resolves an access-keyed layer table, used by regions and fills.
 local function viewTableForAccess(views, access)
   return views[access]
     or (not isLockedAccess(access) and views[config.access.defaultLevelId])
@@ -266,18 +266,13 @@ local function collectConfiguredLayers()
         addLayers(layers, layerNames)
       end
     end
-    for _, roleViews in pairs(page.frameOverrides or {}) do
-      for _, layerNames in pairs(roleViews) do
-        addLayers(layers, layerNames)
-      end
-    end
   end
   return layers
 end
 
--- Calculates page nesting depth for frame override precedence.
+-- Calculates page nesting depth for region fill precedence.
 local function pageDepth(pageId)
-  local groupId = indexes.pageGroupByPageId[pageId]
+  local groupId = indexes.groupByPageId[pageId]
   return #(indexes.groupAncestorsById[groupId] or {}) + 1
 end
 
@@ -285,7 +280,7 @@ end
 local function hiddenOwnerPageIds()
   local hidden = {}
   for groupId in pairs(state.activeGroupIds) do
-    local group = config.pageGroups[groupId]
+    local group = config.groups[groupId]
     if group and group.ownerVisibility == Navigator.OwnerVisibility.HIDDEN then
       local owner = indexes.groupOwnerById[groupId]
       if indexes.ownerKindByGroupId[groupId] == "page" then
@@ -307,31 +302,6 @@ local function accessForOwner(ownerId)
     return effectiveAccessForPage(ownerId)
   end
   return state.access
-end
-
--- Selects the active frame override for each role, preferring deeper pages.
-local function selectedFrameOverrides()
-  local selected = {}
-  for pageId in pairs(state.activePageIds) do
-    local page = config.pages[pageId]
-    for role, roleViews in pairs(page.frameOverrides or {}) do
-      local view = viewTableForAccess(roleViews, effectiveAccessForPage(pageId))
-      if view then
-        local depth = pageDepth(pageId)
-        local current = selected[role]
-        assert(not current or current.depth ~= depth,
-          "multiple active frame overrides for " .. role)
-        if not current or depth > current.depth then
-          selected[role] = {
-            pageId = pageId,
-            depth = depth,
-            view = view,
-          }
-        end
-      end
-    end
-  end
-  return selected
 end
 
 -- Selects the active fill for each region, preferring deeper pages.
@@ -366,24 +336,14 @@ end
 local function resolveDesiredLayers()
   local desired = {}
   local hidden = hiddenOwnerPageIds()
-  local frameOverrides = selectedFrameOverrides()
   local regionFills = selectedRegionFills()
-  local hiddenFramePageIds = {}
-
-  for role in pairs(frameOverrides) do
-    local framePageId = config.frameRoles and config.frameRoles[role]
-    if framePageId then hiddenFramePageIds[framePageId] = true end
-  end
 
   for pageId in pairs(state.activePageIds) do
-    if not hidden[pageId] and not hiddenFramePageIds[pageId] then
+    if not hidden[pageId] then
       local view = viewForPageId(pageId)
       assert(view, pageId .. " is active but unavailable")
       addLayers(desired, view)
     end
-  end
-  for _, override in pairs(frameOverrides) do
-    addLayers(desired, override.view)
   end
   for regionId, region in pairs(config.regions or {}) do
     if ownerIsActive(region.owner) then
@@ -458,7 +418,7 @@ end
 local function closeGroup(groupId)
   for pageId, page in pairs(config.pages) do
     if state.activePageIds[pageId]
-        and indexes.pageGroupByPageId[pageId] == groupId then
+        and indexes.groupByPageId[pageId] == groupId then
       state.activePageIds[pageId] = nil
     end
   end
@@ -498,7 +458,7 @@ end
 -- Determines how an owner's direct groups/pages should interlock.
 local function ownerBehavior(ownerId)
   if ownerId == ROOT_OWNER then return Navigator.GroupBehavior.INTERLOCKED end
-  local group = config.pageGroups[ownerId]
+  local group = config.groups[ownerId]
   if group then return group.behavior end
   return Navigator.GroupBehavior.INDEPENDENT
 end
@@ -577,7 +537,7 @@ activatePage = function(pageId, options)
   assert(page, "unknown pageId: " .. tostring(pageId))
   assert(viewForPageId(pageId), pageId .. " is unavailable for " .. state.access)
 
-  local groupId = indexes.pageGroupByPageId[pageId]
+  local groupId = indexes.groupByPageId[pageId]
   activateGroup(groupId, options)
   closeOtherDirectMembers(groupId, "page", pageId)
   state.activePageIds[pageId] = true
@@ -706,8 +666,8 @@ local function closePageInternal(pageId, record)
   end
 
   if shouldLog("navigation") then log("navigation", "close " .. pageId) end
-  local groupId = indexes.pageGroupByPageId[pageId]
-  local group = config.pageGroups[groupId]
+  local groupId = indexes.groupByPageId[pageId]
+  local group = config.groups[groupId]
   local defaults = indexes.groupDefaultPagesById[groupId] or {}
   local isDefault = false
   for _, defaultPageId in ipairs(defaults) do
@@ -960,20 +920,6 @@ local function normalizeConfig(candidate)
           normalizeViews(pageId .. ".regionFills." .. regionId, regionViews)
       end
     end
-    if page.overrides ~= nil then
-      assert(page.frameOverrides == nil,
-        pageId .. " cannot define both overrides and frameOverrides")
-      page.frameOverrides = page.overrides
-      page.overrides = nil
-    end
-    if page.frameOverrides then
-      assert(type(page.frameOverrides) == "table",
-        pageId .. ".overrides must be a table")
-      for role, roleViews in pairs(page.frameOverrides) do
-        page.frameOverrides[role] =
-          normalizeViews(pageId .. ".frameOverrides." .. role, roleViews)
-      end
-    end
   end
 end
 
@@ -1010,48 +956,20 @@ local function validateControls(ownerId, controls, allowedKeys)
   end
 end
 
--- Validates named frame roles before pages can override them.
-local function validateFrameRoles(candidate)
-  if candidate.frameRoles == nil then return end
-  assert(type(candidate.frameRoles) == "table", "frameRoles must be a table")
-  for role, pageId in pairs(candidate.frameRoles) do
-    assert(type(role) == "string" and role ~= "",
-      "frameRoles contains an invalid role")
-    assert(type(pageId) == "string" and pageId ~= "",
-      "frameRoles." .. role .. " must be a page ID")
-    assert(candidate.pages[pageId],
-      "frameRoles." .. role .. " identifies unknown page " .. tostring(pageId))
-  end
-end
-
--- Validates per-page frame replacement layers.
-local function validateFrameOverrides(pageId, frameOverrides, levels, frameRoles)
-  if frameOverrides == nil then return end
-  assert(type(frameOverrides) == "table",
-    pageId .. ".frameOverrides must be a table")
-  assert(type(frameRoles) == "table",
-    pageId .. ".frameOverrides requires frameRoles")
-  for role, roleViews in pairs(frameOverrides) do
-    assert(frameRoles[role],
-      pageId .. ".frameOverrides has unknown role " .. tostring(role))
-    validateViews(pageId .. ".frameOverrides." .. role, roleViews, levels)
-  end
-end
-
 -- Validates first-class region defaults and ownership.
 local function validateRegions(candidate)
   assert(type(candidate.regions) == "table", "regions must be a table")
   for regionId, region in pairs(candidate.regions) do
     assert(type(regionId) == "string" and regionId ~= "",
       "region IDs must be strings")
-    assert(not candidate.pages[regionId] and not candidate.pageGroups[regionId],
+    assert(not candidate.pages[regionId] and not candidate.groups[regionId],
       regionId .. " is used by more than one page, group, or region")
     assert(type(region) == "table",
       regionId .. " region definition must be a table")
     assert(type(region.owner) == "string" and region.owner ~= "",
       regionId .. " requires owner")
     assert(region.owner == ROOT_OWNER
-        or candidate.pageGroups[region.owner]
+        or candidate.groups[region.owner]
         or candidate.pages[region.owner],
       regionId .. " has an unknown owner")
     validateViews(regionId, region.views, candidate.access.levels)
@@ -1121,7 +1039,7 @@ local function buildIndexes(candidate)
   indexes = {
     groupsById = {}, -- all group definitions by group id
     pagesById = {}, -- all page definitions by page id
-    pageGroupByPageId = {}, -- owning group for each page
+    groupByPageId = {}, -- owning group for each page
     groupOwnerById = {}, -- owner id for each group
     groupsOwnedByOwnerId = {}, -- child groups owned by each owner
     pagesByGroupId = {}, -- direct pages in each group
@@ -1132,7 +1050,7 @@ local function buildIndexes(candidate)
     ownerKindByGroupId = {}, -- root/group/page owner type by group
   }
 
-  for groupId, group in pairs(candidate.pageGroups) do
+  for groupId, group in pairs(candidate.groups) do
     assert(groupId ~= ROOT_OWNER, "root is reserved")
     assert(not candidate.pages[groupId],
       groupId .. " is both a page id and a group id")
@@ -1145,13 +1063,13 @@ local function buildIndexes(candidate)
     assert(not candidate.regions or not candidate.regions[pageId],
       pageId .. " is used by more than one page, group, or region")
     indexes.pagesById[pageId] = page
-    indexes.pageGroupByPageId[pageId] = page.pageGroup
-    indexes.pagesByGroupId[page.pageGroup] =
-      indexes.pagesByGroupId[page.pageGroup] or {}
-    indexes.pagesByGroupId[page.pageGroup][pageId] = true
+    indexes.groupByPageId[pageId] = page.group
+    indexes.pagesByGroupId[page.group] =
+      indexes.pagesByGroupId[page.group] or {}
+    indexes.pagesByGroupId[page.group][pageId] = true
   end
 
-  for groupId, group in pairs(candidate.pageGroups) do
+  for groupId, group in pairs(candidate.groups) do
     local owner = group.owner
     indexes.groupOwnerById[groupId] = owner
     indexes.groupBehaviorById[groupId] = group.behavior
@@ -1161,7 +1079,7 @@ local function buildIndexes(candidate)
     indexes.groupsOwnedByOwnerId[owner][groupId] = true
     if owner == ROOT_OWNER then
       indexes.ownerKindByGroupId[groupId] = "root"
-    elseif candidate.pageGroups[owner] then
+    elseif candidate.groups[owner] then
       indexes.ownerKindByGroupId[groupId] = "group"
     elseif candidate.pages[owner] then
       indexes.ownerKindByGroupId[groupId] = "page"
@@ -1191,7 +1109,7 @@ local function buildIndexes(candidate)
     visited[groupId] = true
     return result
   end
-  for groupId in pairs(candidate.pageGroups) do ancestorsFor(groupId) end
+  for groupId in pairs(candidate.groups) do ancestorsFor(groupId) end
 end
 
 -- Validates the complete authoring model before Navigator accepts it.
@@ -1203,12 +1121,11 @@ local function validateConfig(candidate)
   assert(candidate.uci.transition == nil
       or type(candidate.uci.transition) == "string" and candidate.uci.transition ~= "",
     "uci.transition must be a non-empty string")
-  assert(type(candidate.pageGroups) == "table", "pageGroups must be a table")
+  assert(type(candidate.groups) == "table", "groups must be a table")
   assert(type(candidate.pages) == "table", "pages must be a table")
   normalizeConfig(candidate)
 
   validateAccess(candidate.access)
-  validateFrameRoles(candidate)
 
   for pageId, page in pairs(candidate.pages) do
     assert(type(pageId) == "string" and pageId ~= "", "page IDs must be strings")
@@ -1220,15 +1137,13 @@ local function validateConfig(candidate)
       pageId .. ".parentVisibility is not supported")
     assert(page.defaultChildId == nil,
       pageId .. ".defaultChildId is not supported")
-    assert(type(page.pageGroup) == "string" and page.pageGroup ~= "",
-      pageId .. " requires pageGroup")
-    assert(candidate.pageGroups[page.pageGroup],
-      pageId .. " has unknown pageGroup " .. tostring(page.pageGroup))
+    assert(type(page.group) == "string" and page.group ~= "",
+      pageId .. " requires group")
+    assert(candidate.groups[page.group],
+      pageId .. " has unknown group " .. tostring(page.group))
     validateViews(pageId, page.views, candidate.access.levels)
     validateRegionFills(pageId, page.regionFills,
       candidate.access.levels, candidate.regions)
-    validateFrameOverrides(pageId, page.frameOverrides,
-      candidate.access.levels, candidate.frameRoles)
     if page.controls then
       validateControls(pageId .. ".controls", page.controls, pageControlKeys)
     end
@@ -1237,7 +1152,7 @@ local function validateConfig(candidate)
   buildIndexes(candidate)
   validateRegions(candidate)
 
-  for groupId, group in pairs(candidate.pageGroups) do
+  for groupId, group in pairs(candidate.groups) do
     assert(type(groupId) == "string" and groupId ~= "",
       "group IDs must be strings")
     assert(type(group) == "table", groupId .. " group definition must be a table")
@@ -1265,7 +1180,7 @@ local function validateConfig(candidate)
       for _, pageId in ipairs(group.defaultPageIds) do
         assert(candidate.pages[pageId],
           groupId .. " defaultPageIds contains unknown page " .. tostring(pageId))
-        assert(candidate.pages[pageId].pageGroup == groupId,
+        assert(candidate.pages[pageId].group == groupId,
           groupId .. " defaultPageIds must contain pages in the same group")
       end
     end
@@ -1277,13 +1192,13 @@ local function validateConfig(candidate)
   assert(candidate.pages[lockedHome], "locked home page is missing")
   assert(candidate.pages[defaultHome], "default home page is missing")
   candidate.access.lockedGroupId =
-    candidate.access.lockedGroupId or candidate.pages[lockedHome].pageGroup
+    candidate.access.lockedGroupId or candidate.pages[lockedHome].group
   candidate.access.unlockedGroupId =
-    candidate.access.unlockedGroupId or candidate.pages[defaultHome].pageGroup
-  assert(groupIsUnder(candidate.pages[lockedHome].pageGroup,
+    candidate.access.unlockedGroupId or candidate.pages[defaultHome].group
+  assert(groupIsUnder(candidate.pages[lockedHome].group,
       candidate.access.lockedGroupId),
     "locked home page must be under access.lockedGroupId")
-  assert(groupIsUnder(candidate.pages[defaultHome].pageGroup,
+  assert(groupIsUnder(candidate.pages[defaultHome].group,
       candidate.access.unlockedGroupId),
     "default home page must be under access.unlockedGroupId")
   assert(candidate.pages[lockedHome].views[Navigator.Access.LOCKED],
@@ -1292,7 +1207,7 @@ local function validateConfig(candidate)
   if candidate.access.keypadRequired then
     local keypadPage = candidate.pages[candidate.access.keypadPageId]
     assert(keypadPage, "access.keypadPageId does not identify a page")
-    assert(groupIsUnder(keypadPage.pageGroup, candidate.access.lockedGroupId),
+    assert(groupIsUnder(keypadPage.group, candidate.access.lockedGroupId),
       "keypad page must be under access.lockedGroupId")
     assert(keypadPage.views[Navigator.Access.LOCKED],
       "keypad page requires locked view")
@@ -1517,7 +1432,7 @@ local function compilePage(pageId, pageMarker, groupId, defaultAccess)
     controls = true,
   })
   compiled.id = pageId
-  compiled.pageGroup = groupId
+  compiled.group = groupId
   compiled.views = views
   if next(fills) then compiled.regionFills = fills end
   compiled.controls = compileControls(pageId .. ".controls",
@@ -1553,7 +1468,7 @@ function Navigator.compile(project)
     historyControls = compileControls("historyControls",
       project.historyControls, historyControlKeys),
     historyMaxEntries = project.historyMaxEntries,
-    pageGroups = {},
+    groups = {},
     pages = {},
     regions = {},
   }
@@ -1561,9 +1476,9 @@ function Navigator.compile(project)
   for key, value in pairs(project) do
     if isMarker(value, MARKER_GROUP) then
       assert(type(key) == "string" and key ~= "", "group IDs must be strings")
-      assert(compiled.pageGroups[key] == nil, "duplicate group ID " .. key)
-      compiled.pageGroups[key] = compileGroupSpec(key, value.spec)
-      compiled.pageGroups[key].id = key
+      assert(compiled.groups[key] == nil, "duplicate group ID " .. key)
+      compiled.groups[key] = compileGroupSpec(key, value.spec)
+      compiled.groups[key].id = key
     end
   end
 
@@ -1593,7 +1508,6 @@ function Navigator.compile(project)
   end
 
   validateConfig(compiled)
-  compiled.groups = compiled.pageGroups
   return compiled
 end
 
@@ -1700,7 +1614,6 @@ function Navigator.apply(projectConfig)
   assert(type(projectConfig) == "table", "apply requires a config table")
   validateConfig(projectConfig)
   config = projectConfig
-  config.groups = config.pageGroups
   configureLogging()
   state.access = Navigator.Access.LOCKED
   state.activePageIds = {}
