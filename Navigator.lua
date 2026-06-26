@@ -3,22 +3,16 @@
 
 local Navigator = {} -- public module table returned to the project script
 
-Navigator.Access = { -- built-in access names
-  LOCKED = "locked", -- locked/splash/keypad access
-  DEFAULT = "default", -- normal unlocked fallback access
-}
-
-Navigator.GroupBehavior = { -- how direct group members coexist
-  INTERLOCKED = "interlocked", -- one direct member active at a time
-  INDEPENDENT = "independent", -- multiple direct members may be active
-}
-
-Navigator.OwnerVisibility = { -- page-owned group owner view policy
-  VISIBLE = "visible", -- keep owner page layer visible
-  HIDDEN = "hidden", -- suppress owner page layer while group is active
-}
-
+local ACCESS_LOCKED = "locked" -- locked/splash/keypad access
+local GROUP_INTERLOCKED = "interlocked" -- one direct member active at a time
+local GROUP_INDEPENDENT = "independent" -- multiple direct members may be active
+local OWNER_VISIBLE = "visible" -- keep owner page layer visible
+local OWNER_HIDDEN = "hidden" -- suppress owner page layer while group is active
 local ROOT_OWNER = "root" -- implicit top-level interlocked owner
+
+Navigator.Access = { -- built-in access names
+  LOCKED = ACCESS_LOCKED,
+}
 
 -- Authoring/compiler support -------------------------------------------------
 
@@ -79,10 +73,10 @@ local pagesRegistry = makeRegistry("page")
 local regionsRegistry = makeRegistry("region")
 
 local interlockedMode = marker(MARKER_MODE, {
-  value = Navigator.GroupBehavior.INTERLOCKED,
+  value = GROUP_INTERLOCKED,
 })
 local independentMode = marker(MARKER_MODE, {
-  value = Navigator.GroupBehavior.INDEPENDENT,
+  value = GROUP_INDEPENDENT,
 })
 
 -- Authoring constructor for lifecycle groups and their direct pages.
@@ -134,7 +128,7 @@ local visibleLayers = {} -- last applied physical layer set
 local visibilityInitialized = false -- whether first visibility pass has run
 local historyBack = {} -- back navigation snapshot stack
 local historyForward = {} -- forward navigation snapshot stack
-local accessStateControl -- Q-SYS control mirroring active access
+local accessLevelControl -- Q-SYS control mirroring active access
 local logging = {} -- enabled log categories
 local anyLoggingEnabled = false -- fast skip when all logging is off
 
@@ -228,12 +222,6 @@ local function effectiveAccessForPage(pageId)
   return state.access
 end
 
--- Resolves a page view with default fallback for unlocked access levels.
-local function viewForAccess(page, access)
-  return page.views[access]
-    or (not isLockedAccess(access) and page.views[config.access.defaultLevelId])
-end
-
 -- Resolves an access-keyed layer table, used by regions and fills.
 local function viewTableForAccess(views, access)
   return views[access]
@@ -243,7 +231,7 @@ end
 -- Resolves the concrete layer list for a page in the current or supplied access.
 local function viewForPageId(pageId, access)
   local page = config.pages[pageId]
-  return viewForAccess(page, access or effectiveAccessForPage(pageId))
+  return viewTableForAccess(page.views, access or effectiveAccessForPage(pageId))
 end
 
 -- Adds layer names into the desired visibility set.
@@ -296,7 +284,7 @@ local function hiddenOwnerPageIds()
   local hidden = {}
   for groupId in pairs(state.activeGroupIds) do
     local group = config.groups[groupId]
-    if group and group.ownerVisibility == Navigator.OwnerVisibility.HIDDEN then
+    if group and group.ownerVisibility == OWNER_HIDDEN then
       local owner = indexes.groupOwnerById[groupId]
       if indexes.ownerKindByGroupId[groupId] == "page" then
         hidden[owner] = true
@@ -474,15 +462,15 @@ end
 
 -- Determines how an owner's direct groups/pages should interlock.
 local function ownerBehavior(ownerId)
-  if ownerId == ROOT_OWNER then return Navigator.GroupBehavior.INTERLOCKED end
+  if ownerId == ROOT_OWNER then return GROUP_INTERLOCKED end
   local group = config.groups[ownerId]
   if group then return group.behavior end
-  return Navigator.GroupBehavior.INDEPENDENT
+  return GROUP_INDEPENDENT
 end
 
 -- Enforces interlock by closing active siblings under the same owner.
 local function closeOtherDirectMembers(ownerId, keepKind, keepId)
-  if ownerBehavior(ownerId) ~= Navigator.GroupBehavior.INTERLOCKED then return end
+  if ownerBehavior(ownerId) ~= GROUP_INTERLOCKED then return end
 
   for groupId in pairs(indexes.groupsOwnedByOwnerId[ownerId] or {}) do
     if not (keepKind == "group" and keepId == groupId)
@@ -694,14 +682,14 @@ local function closePageInternal(pageId, record)
     end
   end
 
-  if group.behavior == Navigator.GroupBehavior.INTERLOCKED
+  if group.behavior == GROUP_INTERLOCKED
       and isDefault then
     updateHistoryControls()
     return
   end
 
   closePageOnly(pageId)
-  if group.behavior == Navigator.GroupBehavior.INTERLOCKED
+  if group.behavior == GROUP_INTERLOCKED
       and #defaults > 0 then
     activateDefaultPageForGroup(groupId)
   elseif not groupHasActiveDirectMembers(groupId) then
@@ -728,14 +716,9 @@ local function closeUnavailablePages(targetAccess)
   end
 end
 
--- Mirrors navigator access into the configured Q-SYS access state control.
-local function writeAccessState(targetAccess)
-  if accessStateControl then accessStateControl.String = targetAccess end
-end
-
 -- Changes access through the same path used by user-facing controls.
-local function requestAccess(targetAccess)
-  writeAccessState(targetAccess)
+local function changeAccess(targetAccess)
+  if accessLevelControl then accessLevelControl.String = targetAccess end
   Navigator.setAccess(targetAccess)
 end
 
@@ -850,13 +833,13 @@ end
 -- Handles keypad inactivity by returning from keypad to the locked default.
 onPinEntryTimeout = function()
   if shouldLog("timeout") then log("timeout", "pin entry") end
-  Navigator.closePage(config.access.keypadPageId)
+  changeAccess(Navigator.Access.LOCKED)
 end
 
 -- Handles unlocked session expiry by returning to locked access.
 onSessionTimeout = function()
   if shouldLog("timeout") then log("timeout", "session") end
-  requestAccess(Navigator.Access.LOCKED)
+  changeAccess(Navigator.Access.LOCKED)
 end
 
 -- Runtime config validation --------------------------------------------------
@@ -869,8 +852,8 @@ local pageControlKeys = {
 
 -- Supported global access control aliases.
 local accessControlKeys = {
-  state = true,
-  request = true,
+  level = true,
+  change = true,
   lock = true,
   activityPulse = true,
 }
@@ -889,6 +872,7 @@ local loggingKeys = {
   keypad = true,
   timeout = true,
   controls = true,
+  manifest = true,
 }
 
 -- Validates access level names before they are used as view keys.
@@ -901,7 +885,8 @@ end
 
 -- Normalizes shorthand layer declarations into access-keyed layer lists.
 local function normalizeViews(ownerId, views, defaultAccess)
-  defaultAccess = defaultAccess or Navigator.Access.DEFAULT
+  assert(type(defaultAccess) == "string" and defaultAccess ~= "",
+    ownerId .. " requires a default access level")
   if type(views) == "string" then
     return { [defaultAccess] = { views } }
   end
@@ -927,16 +912,19 @@ local function normalizeConfig(candidate)
   candidate.uci.transition = candidate.uci.transition or "none"
   candidate.regions = candidate.regions or {}
   for regionId, region in pairs(candidate.regions) do
-    region.views = normalizeViews(regionId, region.views)
+    region.views = normalizeViews(regionId, region.views,
+      candidate.access.defaultLevelId)
   end
   for pageId, page in pairs(candidate.pages) do
-    page.views = normalizeViews(pageId, page.views)
+    page.views = normalizeViews(pageId, page.views,
+      candidate.access.defaultLevelId)
     if page.regionFills then
       assert(type(page.regionFills) == "table",
         pageId .. ".regionFills must be a table")
       for regionId, regionViews in pairs(page.regionFills) do
         page.regionFills[regionId] =
-          normalizeViews(pageId .. ".regionFills." .. regionId, regionViews)
+          normalizeViews(pageId .. ".regionFills." .. regionId, regionViews,
+            candidate.access.defaultLevelId)
       end
     end
   end
@@ -1010,7 +998,8 @@ end
 local function validateAccess(access)
   assert(type(access) == "table", "access must be a table")
   assert(type(access.levels) == "table", "access.levels must be a table")
-  access.defaultLevelId = access.defaultLevelId or Navigator.Access.DEFAULT
+  assert(type(access.defaultLevelId) == "string" and access.defaultLevelId ~= "",
+    "one non-locked access level must be the default access level")
   assert(access.defaultLevelId ~= Navigator.Access.LOCKED,
     "locked access cannot be the default access level")
   for _, level in ipairs({ Navigator.Access.LOCKED, access.defaultLevelId }) do
@@ -1142,9 +1131,9 @@ local function validateConfig(candidate)
     "uci.transition must be a non-empty string")
   assert(type(candidate.groups) == "table", "groups must be a table")
   assert(type(candidate.pages) == "table", "pages must be a table")
-  normalizeConfig(candidate)
 
   validateAccess(candidate.access)
+  normalizeConfig(candidate)
 
   for pageId, page in pairs(candidate.pages) do
     assert(type(pageId) == "string" and pageId ~= "", "page IDs must be strings")
@@ -1175,15 +1164,15 @@ local function validateConfig(candidate)
     assert(type(groupId) == "string" and groupId ~= "",
       "group IDs must be strings")
     assert(type(group) == "table", groupId .. " group definition must be a table")
-    assert(group.behavior == Navigator.GroupBehavior.INTERLOCKED
-        or group.behavior == Navigator.GroupBehavior.INDEPENDENT,
+    assert(group.behavior == GROUP_INTERLOCKED
+        or group.behavior == GROUP_INDEPENDENT,
       groupId .. " has invalid behavior")
     assert(type(group.owner) == "string" and group.owner ~= "",
       groupId .. " requires owner")
     local ownerKind = indexes.ownerKindByGroupId[groupId]
     if ownerKind == "page" then
-      assert(group.ownerVisibility == Navigator.OwnerVisibility.VISIBLE
-          or group.ownerVisibility == Navigator.OwnerVisibility.HIDDEN,
+      assert(group.ownerVisibility == OWNER_VISIBLE
+          or group.ownerVisibility == OWNER_HIDDEN,
         groupId .. " page-owned groups require ownerVisibility")
     else
       assert(group.ownerVisibility == nil,
@@ -1192,7 +1181,7 @@ local function validateConfig(candidate)
     if group.defaultPageIds then
       assert(type(group.defaultPageIds) == "table",
         groupId .. ".defaultPageIds must be a table")
-      if group.behavior == Navigator.GroupBehavior.INTERLOCKED then
+      if group.behavior == GROUP_INTERLOCKED then
         assert(#group.defaultPageIds <= 1,
           groupId .. " interlocked groups may have at most one default")
       end
@@ -1234,9 +1223,9 @@ local function validateConfig(candidate)
 
   if candidate.accessControls then
     validateControls("accessControls", candidate.accessControls, accessControlKeys)
-    assert(candidate.accessControls.state, "accessControls.state is required")
-    assert(not isControlList(candidate.accessControls.state),
-      "accessControls.state must be a single control")
+    assert(candidate.accessControls.level, "accessControls.level is required")
+    assert(not isControlList(candidate.accessControls.level),
+      "accessControls.level must be a single control")
   end
   if candidate.historyControls then
     validateControls("historyControls", candidate.historyControls,
@@ -1293,8 +1282,9 @@ local function resolvePageRef(value, context)
 end
 
 -- Resolves authored control names through Q-SYS Controls while preserving objects.
-local function compileControl(ownerId, value)
+local function compileControl(ownerId, value, manifestControls)
   if type(value) == "string" then
+    if manifestControls then manifestControls[value] = true end
     assert(type(Controls) == "table",
       ownerId .. " control " .. value .. " requires Controls")
     local control = Controls[value]
@@ -1304,7 +1294,8 @@ local function compileControl(ownerId, value)
   if isControlList(value) then
     local result = {}
     for index, item in ipairs(value) do
-      result[index] = compileControl(ownerId .. "[" .. index .. "]", item)
+      result[index] =
+        compileControl(ownerId .. "[" .. index .. "]", item, manifestControls)
     end
     return result
   end
@@ -1312,14 +1303,14 @@ local function compileControl(ownerId, value)
 end
 
 -- Compiles a page/global controls table and rejects unsupported control aliases.
-local function compileControls(ownerId, controls, allowedKeys)
+local function compileControls(ownerId, controls, allowedKeys, manifestControls)
   if controls == nil then return nil end
   assert(type(controls) == "table", ownerId .. " controls must be a table")
   local compiled = {}
   for key, value in pairs(controls) do
     assert(allowedKeys[key], ownerId .. "." .. tostring(key)
       .. " is not a supported control")
-    compiled[key] = compileControl(ownerId .. "." .. key, value)
+    compiled[key] = compileControl(ownerId .. "." .. key, value, manifestControls)
   end
   return compiled
 end
@@ -1448,14 +1439,14 @@ local function compileGroupSpec(groupId, spec)
     assert(type(spec.parentVisible) == "boolean",
       groupId .. ".parentVisible must be boolean")
     compiled.ownerVisibility = spec.parentVisible
-      and Navigator.OwnerVisibility.VISIBLE
-      or Navigator.OwnerVisibility.HIDDEN
+      and OWNER_VISIBLE
+      or OWNER_HIDDEN
   end
   return compiled
 end
 
 -- Compiles one authored page into the runtime page representation.
-local function compilePage(pageId, pageMarker, groupId, defaultAccess)
+local function compilePage(pageId, pageMarker, groupId, defaultAccess, manifestControls)
   local spec = pageMarker.spec
   assert(type(spec) == "table", pageId .. " page spec must be a table")
   local views, fills = compileContent(pageId, spec.content, defaultAccess)
@@ -1468,7 +1459,7 @@ local function compilePage(pageId, pageMarker, groupId, defaultAccess)
   compiled.views = views
   if next(fills) then compiled.regionFills = fills end
   compiled.controls = compileControls(pageId .. ".controls",
-    spec.controls, pageControlKeys)
+    spec.controls, pageControlKeys, manifestControls)
   return compiled
 end
 
@@ -1493,14 +1484,15 @@ function Navigator.compile(project)
   assert(type(project) == "table", "compile requires a project table")
   local access = compileAccess(project.access or {})
   local defaultAccess = access.defaultLevelId
+  local manifestControls = {}
   local compiled = {
     uci = clonePlainTable(project.uci or {}),
     logging = project.logging,
     access = access,
     accessControls = compileControls("accessControls",
-      project.accessControls, accessControlKeys),
+      project.accessControls, accessControlKeys, manifestControls),
     historyControls = compileControls("historyControls",
-      project.historyControls, historyControlKeys),
+      project.historyControls, historyControlKeys, manifestControls),
     historyMaxEntries = project.historyMaxEntries,
     groups = {},
     pages = {},
@@ -1526,7 +1518,8 @@ function Navigator.compile(project)
         assert(compiled.pages[pageId] == nil,
           "duplicate page ID " .. tostring(pageId))
         compiled.pages[pageId] =
-          compilePage(pageId, pageMarker, groupId, defaultAccess)
+          compilePage(pageId, pageMarker, groupId, defaultAccess,
+            manifestControls)
       end
     end
   end
@@ -1544,6 +1537,9 @@ function Navigator.compile(project)
     end
   end
 
+  compiled.manifest = {
+    controls = manifestControls,
+  }
   validateConfig(compiled)
   return compiled
 end
@@ -1562,8 +1558,34 @@ local function configureLogging()
   end
 end
 
--- Applies an access state control string as a navigator access request.
-local function applyAccessString(accessString)
+-- Returns sorted keys from a set-like table for stable diagnostic output.
+local function sortedSetKeys(set)
+  local keys = {}
+  for key in pairs(set or {}) do
+    keys[#keys + 1] = key
+  end
+  table.sort(keys)
+  return keys
+end
+
+-- Logs configured Q-SYS layer and control names when manifest logging is enabled.
+local function logManifest()
+  if not shouldLog("manifest") then return end
+
+  log("manifest", "Q-SYS layers")
+  for _, layerName in ipairs(sortedSetKeys(collectConfiguredLayers())) do
+    log("manifest", "  layer: " .. layerName)
+  end
+
+  log("manifest", "Q-SYS controls")
+  for _, controlName in ipairs(sortedSetKeys(config.manifest
+      and config.manifest.controls)) do
+    log("manifest", "  control: " .. controlName)
+  end
+end
+
+-- Applies an external access level string to Navigator.
+local function applyAccessLevelString(accessString)
   local targetAccess = string.lower(tostring(accessString or ""))
   if targetAccess == "" then return end
   if not config.access.levels[targetAccess] then
@@ -1573,24 +1595,31 @@ local function applyAccessString(accessString)
   Navigator.setAccess(targetAccess)
 end
 
+-- Resets the external access level bridge before any startup navigation runs.
+local function initializeAccessLevelControl()
+  accessLevelControl = config.accessControls and config.accessControls.level
+  if accessLevelControl then accessLevelControl.String = Navigator.Access.LOCKED end
+end
+
 -- Wires configured Q-SYS controls to navigator actions.
 local function bindControls()
   local accessControls = config.accessControls
   if accessControls then
-    accessStateControl = accessControls.state
-    accessStateControl.EventHandler = function(control)
-      applyAccessString(control.String)
+    accessLevelControl = accessControls.level
+    accessLevelControl.EventHandler = function(control)
+      applyAccessLevelString(control.String)
     end
 
-    forEachControl(accessControls.request, function(control)
+    forEachControl(accessControls.change, function(control)
       control.EventHandler = function()
-        if shouldLog("controls") then log("controls", "access request pressed") end
-        if isLockedAccess(state.access) and config.access.keypadRequired then
+        if shouldLog("controls") then log("controls", "change access pressed") end
+        if config.access.keypadRequired then
+          if not isLockedAccess(state.access) then
+            changeAccess(Navigator.Access.LOCKED)
+          end
           Navigator.openPage(config.access.keypadPageId)
-        elseif isLockedAccess(state.access) then
-          requestAccess(config.access.defaultLevelId)
-        elseif not isLockedAccess(state.access) then
-          requestAccess(config.access.defaultLevelId)
+        else
+          changeAccess(config.access.defaultLevelId)
         end
       end
     end)
@@ -1598,7 +1627,7 @@ local function bindControls()
     forEachControl(accessControls.lock, function(control)
       control.EventHandler = function()
         if shouldLog("controls") then log("controls", "lock pressed") end
-        requestAccess(Navigator.Access.LOCKED)
+        changeAccess(Navigator.Access.LOCKED)
       end
     end)
 
@@ -1653,7 +1682,9 @@ function Navigator.apply(projectConfig)
   assert(type(projectConfig) == "table", "apply requires a config table")
   validateConfig(projectConfig)
   config = projectConfig
+  initializeAccessLevelControl()
   configureLogging()
+  logManifest()
   state.access = Navigator.Access.LOCKED
   state.activePageIds = {}
   state.activeGroupIds = {}
@@ -1661,7 +1692,6 @@ function Navigator.apply(projectConfig)
   visibilityInitialized = false
   historyBack = {}
   historyForward = {}
-  accessStateControl = nil
   activatePage(accessHomePageId(Navigator.Access.LOCKED))
   updatePageOpenControls()
   reconcileVisibility()

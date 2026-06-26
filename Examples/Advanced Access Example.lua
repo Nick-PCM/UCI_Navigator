@@ -1,13 +1,17 @@
 -- Advanced Access Example.lua
--- Navigator is assumed to have already been loaded.
---
 -- Demonstrates authored custom access content, fallback, and region fills.
 
+-- Helpful for local tooling, editor diagnostics, and documentation examples.
 local Navigator = require("Navigator")
 
 -- Compile the user-friendly authored project into Navigator runtime config.
 local config = Navigator.compile({
-  uci = { pageName = "Main" },
+  uci = { pageName = "Main" }, -- specifies the UCI Page the UCI Layers being navigated belong to. 
+
+  -- Enable Navigator print() logging by category.
+  logging = {
+    manifest = true, -- print configured Q-SYS layers and controls at startup
+  },
 
   -- Define access levels and entry pages.
   access = {
@@ -18,8 +22,8 @@ local config = Navigator.compile({
 
   -- Bind global Q-SYS controls for access behavior.
   accessControls = {
-    state = "Access State", -- external access state bridge
-    request = "Access Request", -- request unlock or open keypad
+    level = "Access Level", -- external access level bridge
+    change = "Change Access Level", -- open the keypad to change access level
     lock = "Lock Request", -- return to locked access
     activityPulse = "Activity Pulse", -- restart active timers
   },
@@ -60,8 +64,8 @@ local config = Navigator.compile({
   tools = group(
     { owner = groups.session, mode = independent },
     {
-      power = page({ content = "Power Page", controls = { open = "Open Power", close = "Close Power" } }),
-      help = page({ content = "Help Page", controls = { open = "Open Help", close = "Close Help" } }),
+      power = page({ content = "Power", controls = { open = "Open Power", close = "Close Power" } }),
+      help = page({ content = "Help", controls = { open = "Open Help", close = "Close Help" } }),
     }
   ),
 
@@ -69,14 +73,8 @@ local config = Navigator.compile({
   system = group(
     { owner = groups.session, mode = interlocked, startAt = pages.home },
     {
-      home = page({
-        content = {
-          user = "Home",
-          admin = { "Home", "Home Admin" },
-        },
-        controls = { open = "Open Home Page" },
-      }),
-      audio = page({ content = { user = "Audio", admin = "Audio Admin" }, controls = { open = "Open Audio Page" } }),
+      home = page({ content = { user = "Home", admin = { "Home", "Admin Home" } }, controls = { open = "Open Home Page" } }),
+      audio = page({ content = { user = "Audio" }, controls = { open = "Open Audio Page" } }),
       video = page({ content = "Video", controls = { open = "Open Video Page" } }),
     }
   ),
@@ -85,16 +83,12 @@ local config = Navigator.compile({
     { owner = pages.audio, mode = interlocked, parentVisible = true, startAt = pages.audioRouting },
     {
       audioRouting = page({
-        content = {
-          user = "Audio Routing",
-          admin = { "Audio Routing", "Audio Routing Admin" },
-        },
-        controls = { open = "Open Audio Routing" },
-      }),
+        content = { user = "Audio Routing", admin = { "Audio Routing", "Admin Audio Routing" } },
+        controls = { open = {"Open Audio Routing"}} }),
       audioSettings = page({
         content = {
           admin = {
-            "Audio Settings Admin",
+            "Admin Audio Settings",
             regions.footer("Audio Settings Footer"), -- fill the footer region while this page is active
           },
         },
@@ -109,9 +103,9 @@ local config = Navigator.compile({
       videoRouting = page({
         content = {
           user = "Video Routing",
-          admin = { "Video Routing", "Video Routing Admin" },
+          admin = "Admin Video Routing" ,
         },
-        controls = { open = "Open Video Routing", close = "Close Video Routing" },
+        controls = { open = "Open Video Routing" },
       }),
       videoSettings = page({ content = "Video Settings", controls = { open = "Open Video Settings", close = "Close Video Settings" } }),
     }

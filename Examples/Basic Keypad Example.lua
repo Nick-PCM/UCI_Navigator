@@ -1,7 +1,8 @@
 -- Basic Keypad Example.lua
--- Navigator is assumed to have already been loaded.
---
 -- Demonstrates the authored compile/apply API with keypad access.
+
+-- Helpful for local tooling, editor diagnostics, and documentation examples.
+local Navigator = require("Navigator")
 
 -- Compile the user-friendly authored project into Navigator runtime config.
 local config = Navigator.compile({
@@ -15,6 +16,7 @@ local config = Navigator.compile({
     keypad = true, -- keypad access flow
     timeout = true, -- pin/session timeout activity
     controls = true, -- control event handling
+    manifest = true, -- print configured Q-SYS layers and controls at startup
   },
 
   -- Define access levels and entry pages.
@@ -25,8 +27,8 @@ local config = Navigator.compile({
 
   -- Bind global Q-SYS controls for access behavior.
   accessControls = {
-    state = "Access State", -- external access state bridge
-    request = "Access Request", -- request unlock or open keypad
+    level = "Access Level", -- external access level bridge
+    change = "Change Access Level", -- open the keypad to change access level
     lock = "Lock Request", -- return to locked access
     activityPulse = "Activity Pulse", -- restart active timers
   },
@@ -99,7 +101,7 @@ local config = Navigator.compile({
   videoSubpages = group(
     { owner = pages.video, mode = interlocked, parentVisible = true, startAt = pages.videoRouting },
     {
-      videoRouting = page({ content = "Video Routing", controls = { open = "Open Video Routing", close = "Close Video Routing" } }),
+      videoRouting = page({ content = "Video Routing", controls = { open = "Open Video Routing" } }),
       videoSettings = page({ content = "Video Settings", controls = { open = "Open Video Settings", close = "Close Video Settings" } }),
     }
   ),

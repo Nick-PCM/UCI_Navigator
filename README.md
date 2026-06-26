@@ -1,137 +1,76 @@
 # UCI Navigator
 
-Navigator is a Lua module for controlling Q-SYS UCI layer visibility from a project table that describes pages, groups, access, regions, and controls.
+Navigator is a Lua module for Q-SYS UCI navigation. It keeps UCI layer visibility, access level, page history, shared regions, and control bindings in one authored project table.
 
-The normal authoring path is:
+Use it when a UCI has more than a few pages, when locked and unlocked experiences need to coexist, or when shared chrome such as headers, footers, ribbons, or backgrounds should change with the active page.
+
+## Core Terms
+
+- `page`: a navigable unit that shows one or more Q-SYS UCI layers.
+- `group`: a container that decides whether its pages interlock or can coexist.
+- `region`: an optional shared presentation area with default content that active pages can fill.
+- `access`: the current access level, such as `locked`, `user`, or an optional project-specific level.
+- `controls`: Q-SYS controls that open pages, change access, lock, pulse activity, or move through history.
+
+`groups.root` is the built-in top-level owner. Root-owned groups are normally used to separate the locked access gate from the unlocked session.
+
+## Quick Start
 
 ```lua
+-- Helpful for local tooling, editor diagnostics, and documentation examples.
+local Navigator = require("Navigator")
+
 local config = Navigator.compile({
-  -- authored project
+  uci = { pageName = "Main" },
+
+  logging = {
+    manifest = true,
+  },
+
+  access = {
+    locked = { startAt = pages.splash, keypad = pages.keypad, pinEntryTimeoutSeconds = 30 },
+    user = { startAt = pages.home, sessionTimeoutSeconds = 600, default = true },
+  },
+
+  accessControls = {
+    level = "Access Level",
+    change = "Change Access Level",
+    lock = "Lock Request",
+    activityPulse = "Activity Pulse",
+  },
+
+  gate = group({ owner = groups.root, mode = independent }),
+
+  accessGate = group(
+    { owner = groups.gate, mode = interlocked, startAt = pages.splash },
+    {
+      splash = page({ content = { locked = "Splash" } }),
+      keypad = page({ content = { locked = "Keypad" }, controls = { open = "Open Keypad", close = "Close Keypad" } }),
+    }
+  ),
+
+  session = group({ owner = groups.root, mode = independent }),
+
+  system = group(
+    { owner = groups.session, mode = interlocked, startAt = pages.home },
+    {
+      home = page({ content = "Home", controls = { open = "Open Home Page" } }),
+      audio = page({ content = "Audio", controls = { open = "Open Audio Page" } }),
+    }
+  ),
 })
 
 Navigator.apply(config)
 ```
 
-`Navigator.compile(...)` expands the authoring format into Navigator's runtime configuration. `Navigator.apply(...)` installs that configuration into the active Q-SYS runtime.
+`Navigator.compile(...)` turns the authored table into runtime config. `Navigator.apply(config)` validates it, binds Q-SYS controls, resets access to `locked`, and initializes navigation.
+
 
 ## Files
 
-- `Navigator.lua`: the navigation module.
-- `Navigator.md`: deeper model and runtime rules.
-- `Examples/Basic Keypad Example.lua`: authored config with keypad access.
-- `Examples/Basic No Keypad Example.lua`: authored config without keypad access.
-- `Examples/Advanced Access Example.lua`: authored config with a custom access level.
-
-## Authoring Model
-
-Navigator has three authored primitives:
-
-- A `page(...)` is navigable visible content.
-- A `group(...)` defines ownership and coexistence policy for pages.
-- A `region(...)` is an owner-scoped presentation area with default content that active pages can fill.
-
-Object ids come from table keys:
-
-```lua
-session = group({ owner = groups.root, mode = independent })
-
-system = group({ owner = groups.session, mode = interlocked, startAt = pages.home }, {
-  home = page({ content = "Home" }),
-  audio = page({ content = "Audio" }),
-})
-```
-
-References use typed registries:
-
-```lua
-groups.session
-pages.audio
-regions.footer
-```
-
-`groups.root` is the built-in root owner. Group modes use bare sentinels:
-
-```lua
-mode = interlocked
-mode = independent
-```
-
-## Access
-
-Top-level `access` declares access levels. The basic examples use `locked` and `user`; the advanced example adds `admin` as a custom access level. `locked` is reserved for locked access, and `user` sets `default = true` so it becomes the fallback target for bare content and normal access requests.
-
-```lua
-access = {
-  locked = {
-    startAt = pages.splash,
-    keypad = pages.keypad,
-    pinEntryTimeoutSeconds = 30,
-  },
-
-  user = {
-    startAt = pages.home,
-    sessionTimeoutSeconds = 600,
-    default = true,
-  },
-
-  admin = {},
-}
-```
-
-## Pages And Controls
-
-Page `content` can be a layer name, a list of layer names, or an access-keyed table. Page controls are authored by Q-SYS control name and compiled through `Controls[controlName]`.
-
-```lua
-audioSettings = page({
-  content = {
-    user = { "Audio Settings", regions.footer("Audio Settings Footer") },
-    admin = { "Audio Settings", "Audio Admin Tools" },
-  },
-  controls = {
-    open = "Open Audio Settings",
-  },
-})
-```
-
-Supported page controls are `open` and `close`. Global `accessControls` and `historyControls` also accept control-name strings.
-
-## Regions
-
-Regions exist while their owner is active. They show default content unless the most specific active page fills them.
-
-```lua
-regions = {
-  footer = region({ owner = groups.session, content = "Footer" }),
-}
-```
-
-Page fills use a callable region reference:
-
-```lua
-regions.footer("Audio Settings Footer")
-```
-
-If two equally specific active pages fill the same region, Navigator errors instead of guessing.
-
-## Custom Calls
-
-Compiled pages are handles for custom script code:
-
-```lua
-local config = Navigator.compile({
-  -- project
-})
-
-Navigator.apply(config)
-
-Controls["Custom Audio Button"].EventHandler = function()
-  Navigator.open(config.pages.audio)
-end
-```
-
-`Navigator.close(config.pages.audio)` closes the same page.
-
-## Runtime Config
-
-The compiled config exposes resolved handles under `config.pages`, `config.groups`, and `config.regions`. Treat that compiled table as Navigator's runtime config and pass it directly to `Navigator.apply(...)`.
+- `Navigator.lua`: the implementation.
+- `Navigator.md`: the full technical model, validation rules, and usage patterns.
+- `Basic Keypad Runtime Config.md`: the basic keypad example written without the authoring helpers or compiler.
+- `Examples/Basic Keypad Example.lua`: a basic locked/unlocked UCI with keypad access.
+- `Examples/Basic No Keypad Example.lua`: the same structure without keypad access.
+- `Examples/Advanced Access Example.lua`: custom access content, fallback, and region fills.

@@ -1,7 +1,8 @@
 -- Basic No Keypad Example.lua
--- Navigator is assumed to have already been loaded.
---
--- Mirrors Basic Keypad Example.lua, but access requests unlock directly.
+-- Mirrors Basic Keypad Example.lua, but change access goes directly to the default level.
+
+-- Helpful for local tooling, editor diagnostics, and documentation examples.
+local Navigator = require("Navigator")
 
 -- Compile the user-friendly authored project into Navigator runtime config.
 local config = Navigator.compile({
@@ -14,6 +15,7 @@ local config = Navigator.compile({
     history = true, -- back/forward stack changes
     timeout = true, -- session timeout activity
     controls = true, -- control event handling
+    manifest = true, -- print configured Q-SYS layers and controls at startup
   },
 
   -- Define access levels and entry pages.
@@ -24,8 +26,8 @@ local config = Navigator.compile({
 
   -- Bind global Q-SYS controls for access behavior.
   accessControls = {
-    state = "Access State", -- external access state bridge
-    request = "Access Request", -- request unlock
+    level = "Access Level", -- external access level bridge
+    change = "Change Access Level", -- change to default access
     lock = "Lock Request", -- return to locked access
     activityPulse = "Activity Pulse", -- restart active timers
   },
