@@ -1,5 +1,5 @@
 
-local Navigator = require("Navigator-NoRegion")
+local Navigator = require("Navigator")
 
 Navigator.apply({
   uci = { pageName = "Main" },
@@ -11,20 +11,25 @@ Navigator.apply({
     keypad = true, -- keypad access flow
     timeout = true, -- pin/session timeout activity
     controls = true, -- control event handling
-    manifest = true, -- print configured Q-SYS layers and controls at startup
+    qsys = true, -- include UCI page/layer names when Q-SYS visibility calls fail
+    manifest = false, -- print configured Q-SYS layers and controls at startup
   },
 
   access = {
     locked = {
-      startAt = "splash",
+      startAt = "accessGate",
       keypad = "keypad",
       pinEntryTimeoutSeconds = 30
     },
     user = {
-      startAt = "home",
+      startAt = "session",
       sessionTimeoutSeconds = 600,
       default = true
     },
+    admin = {
+      startAt = "session",
+      sessionTimeoutSeconds = 600,
+    }
   },
 
   accessControls = {
@@ -39,17 +44,52 @@ Navigator.apply({
     forward = "Forward", -- navigate to next state
   },
 
+
   -- Root-owned groups separate locked access from the unlocked session.
-  gate = group({
+  entry = group({
     owner = "root",
     mode = "independent"
   }),
 
   -- accessGate is interlocked so splash and keypad replace each other inside gate.
   accessGate = group({
-    owner = "gate",
+    owner = "entry",
     mode = "interlocked",
     startAt = "splash"
+  }),
+
+  -- Session is the root-owned container for unlocked pages.
+  session = group({ 
+    owner = "root", 
+    mode = "independent",
+    startAt = { "frame", "system" }
+  }),
+
+  -- Tools are independent utility pages within the session.
+  tools = group({ 
+    owner = "session", 
+    mode = "independent" 
+  }),
+
+  -- System is the primary interlocked page group.
+  system = group({
+    owner = "session",
+    mode = "interlocked",
+    startAt = "home"
+  }),
+
+  audioSubpages = group({
+    owner = "audio",
+    mode = "interlocked",
+    parentVisible = true,
+    startAt = "audioRouting"
+  }),
+  
+  videoSubpages = group({
+    owner = "video",
+    mode = "independent",
+    parentVisible = false,
+    startAt = "videoRouting"
   }),
 
   splash = page({
@@ -61,18 +101,6 @@ Navigator.apply({
     owner = "accessGate",
     content = { locked = "Keypad" }, 
     controls = { open = "Open Keypad", close = "Close Keypad" } 
-  }),
-
-  -- Session is the root-owned container for unlocked pages.
-  session = group({ 
-    owner = "root", 
-    mode = "independent" 
-  }),
-
-  -- Tools are independent utility pages within the session.
-  tools = group({ 
-    owner = "session", 
-    mode = "independent" 
   }),
 
   power = page({
@@ -87,11 +115,18 @@ Navigator.apply({
     controls = { open = "Open Help", close = "Close Help" }
   }),
 
-  -- System is the primary interlocked page group.
-  system = group({
+  secret = page({
+    owner = "tools",
+    content = "Secret",
+    controls = { open = "Open Secret", close = "Close Secret" }
+  }),
+
+  frame = page({
     owner = "session",
-    mode = "interlocked",
-    startAt = "home"
+    content = {
+      user = { "Header", "Footer", "Ribbon", "Background"},
+      admin = { "Header", "Footer", "Ribbon", "Admin Ribbon", "Background"},
+    }
   }),
 
   home = page({
@@ -102,7 +137,7 @@ Navigator.apply({
 
   audio = page({ 
     owner = "system",
-    content = "Audio",
+    content = { user = "Audio", admin = "Admin Audio"},
     controls = { open = "Open Audio Page" }
   }),
 
@@ -112,37 +147,22 @@ Navigator.apply({
     controls = { open = "Open Video Page" }
   }),
 
-  audioSubpages = group({
-    owner = "audio",
-    mode = "interlocked",
-    parentVisible = true,
-    startAt = "audioRouting"
-  }),
-
   audioRouting = page({
     owner = "audioSubpages",
     content = "Audio Routing",
-    controls = { open = "Open Audio Routing" }
+    controls = { open = { "Open Audio Routing", "Open Admin Audio Routing" }}
   }),
 
   audioSettings = page({
     owner = "audioSubpages",
-    content = { "Audio Settings", "Audio Settings Footer"},
-    controls = { open = "Open Audio Settings" },
-  }),
-
-
-  videoSubpages = group({
-    owner = "video",
-    mode = "interlocked",
-    parentVisible = true,
-    startAt = "videoRouting"
+    content = { user = "Audio Settings", admin = "Admin Audio Settings Footer"},
+    controls = { open = { "Open Audio Settings", "Open Admin Audio Settings" }},
   }),
 
   videoRouting = page({
     owner = "videoSubpages",
     content = "Video Routing",
-    controls = { open = "Open Video Routing" }
+    controls = { open = "Open Video Routing", close = "Close Video Settings" }
   }),
 
   videoSettings = page({ 
@@ -151,17 +171,5 @@ Navigator.apply({
     controls = { open = "Open Video Settings", close = "Close Video Settings" } 
   }),
 
-
-  videoReplacement = group({
-    owner = "video",
-    mode = "independent",
-    parentVisible = false
-  }),
-
-  videoTest = page({
-    owner = "video",
-    content = "Video Test",
-    controls = { open = "Open Video Test", close = "Close Video Test" }
-  }),
 
 })

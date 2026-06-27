@@ -1,35 +1,39 @@
 # UCI Navigator
 
-Navigator is a Lua module for Q-SYS UCI navigation. It keeps UCI layer visibility, access level, page history, shared regions, and control bindings in one authored project table.
+Navigator is a Lua runtime for Q-SYS UCI navigation. It keeps layer visibility, access level, keypad/session timing, history, and Q-SYS control bindings in one flat project table.
 
-Use it when a UCI has more than a few pages, when locked and unlocked experiences need to coexist, or when shared chrome such as headers, footers, ribbons, or backgrounds should change with the active page.
+Use it when a UCI has more than a few pages, when locked and unlocked views need to coexist, or when repeated frame layers such as headers, footers, ribbons, and backgrounds should stay predictable as pages change.
 
 ## Core Terms
 
-- `page`: a navigable unit that shows one or more Q-SYS UCI layers.
-- `group`: a container that decides whether its pages interlock or can coexist.
-- `region`: an optional shared presentation area with default content that active pages can fill.
-- `access`: the current access level, such as `locked`, `user`, or an optional project-specific level.
+- `page`: a navigable state that shows one or more Q-SYS UCI layers.
+- `group`: a container that owns direct pages and/or groups.
+- `mode`: `interlocked` means one direct member at a time; `independent` means direct members can coexist.
+- `access`: the current access level, usually `locked`, `user`, and optionally project-specific levels such as `admin`.
+- `startAt`: the direct member or members a group opens by default.
 - `controls`: Q-SYS controls that open pages, change access, lock, pulse activity, or move through history.
 
-`groups.root` is the built-in top-level owner. Root-owned groups are normally used to separate the locked access gate from the unlocked session.
+The implicit top-level owner is the string `"root"`.
 
 ## Quick Start
 
 ```lua
--- Helpful for local tooling, editor diagnostics, and documentation examples.
+-- Useful for local tooling and documentation. In Q-SYS, require only works if
+-- Navigator.lua is available to the Lua environment; otherwise load/paste it first.
 local Navigator = require("Navigator")
 
-local config = Navigator.compile({
+Navigator.apply({
   uci = { pageName = "Main" },
 
   logging = {
     manifest = true,
+    qsys = true,
   },
 
   access = {
-    locked = { startAt = pages.splash, keypad = pages.keypad, pinEntryTimeoutSeconds = 30 },
-    user = { startAt = pages.home, sessionTimeoutSeconds = 600, default = true },
+    locked = { startAt = "accessGate", keypad = "keypad", pinEntryTimeoutSeconds = 30 },
+    user = { startAt = "session", sessionTimeoutSeconds = 600, default = true },
+    admin = { startAt = "session", sessionTimeoutSeconds = 600 },
   },
 
   accessControls = {
@@ -39,38 +43,68 @@ local config = Navigator.compile({
     activityPulse = "Activity Pulse",
   },
 
-  gate = group({ owner = groups.root, mode = independent }),
+  entry = group({ owner = "root", mode = "independent" }),
+  accessGate = group({ owner = "entry", mode = "interlocked", startAt = "splash" }),
 
-  accessGate = group(
-    { owner = groups.gate, mode = interlocked, startAt = pages.splash },
-    {
-      splash = page({ content = { locked = "Splash" } }),
-      keypad = page({ content = { locked = "Keypad" }, controls = { open = "Open Keypad", close = "Close Keypad" } }),
-    }
-  ),
+  session = group({
+    owner = "root",
+    mode = "independent",
+    startAt = { "frame", "system" },
+  }),
 
-  session = group({ owner = groups.root, mode = independent }),
+  system = group({ owner = "session", mode = "interlocked", startAt = "home" }),
 
-  system = group(
-    { owner = groups.session, mode = interlocked, startAt = pages.home },
-    {
-      home = page({ content = "Home", controls = { open = "Open Home Page" } }),
-      audio = page({ content = "Audio", controls = { open = "Open Audio Page" } }),
-    }
-  ),
+  splash = page({ owner = "accessGate", content = { locked = "Splash" } }),
+  keypad = page({ owner = "accessGate", content = { locked = "Keypad" } }),
+
+  frame = page({
+    owner = "session",
+    content = {
+      user = { "Header", "Footer", "Ribbon", "Background" },
+      admin = { "Header", "Footer", "Ribbon", "Admin Ribbon", "Background" },
+    },
+  }),
+
+  home = page({
+    owner = "system",
+    content = "Home",
+    controls = { open = "Open Home Page" },
+  }),
 })
-
-Navigator.apply(config)
 ```
 
-`Navigator.compile(...)` turns the authored table into runtime config. `Navigator.apply(config)` validates it, binds Q-SYS controls, resets access to `locked`, and initializes navigation.
+`Navigator.apply(project)` validates the authored table, binds configured Q-SYS controls, sets the external access-level control to `locked`, opens locked access, and reconciles UCI layer visibility.
 
+## Loading From A Core File
+
+If Q-SYS can read project files from the Core filesystem, `qsys-require.lua` shows a minimal Lua 5.3 loader for files that end with `return aModule`:
+
+```lua
+local function loadModule(path)
+  local file = assert(io.open(path, "r"))
+  local source = file:read("*a")
+  file:close()
+
+  return assert(load(source, "@" .. path))()
+end
+
+local Navigator = loadModule("/design/lua/Navigator.lua")
+```
+
+## Authoring Rules
+
+- Groups and pages are top-level entries in the project table.
+- Every group and page has an explicit `owner`.
+- `access.<level>.startAt` names one group.
+- `group.startAt` names direct members of that group.
+- An `independent` group can use a single `startAt` ID or a list of direct page/group IDs.
+- An `interlocked` group can use only one `startAt` ID.
+- Page-owned groups require `parentVisible = true` or `parentVisible = false`.
+- Page content can be one layer name, a list of layer names, or an access-keyed table.
 
 ## Files
 
 - `Navigator.lua`: the implementation.
 - `Navigator.md`: the full technical model, validation rules, and usage patterns.
-- `Basic Keypad Runtime Config.md`: the basic keypad example written without the authoring helpers or compiler.
-- `Examples/Basic Keypad Example.lua`: a basic locked/unlocked UCI with keypad access.
-- `Examples/Basic No Keypad Example.lua`: the same structure without keypad access.
-- `Examples/Advanced Access Example.lua`: custom access content, fallback, and region fills.
+- `example-uci.lua`: a flat keypad example using the current engine surface.
+- `qsys-require.lua`: a minimal loader experiment for Core filesystem Lua files.

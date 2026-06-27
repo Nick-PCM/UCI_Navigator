@@ -1,122 +1,178 @@
 # Navigator
 
-Navigator is a small UCI navigation runtime and authoring compiler for Q-SYS Lua projects. Its job is to make layer visibility deterministic as the interface moves through pages, access levels, shared regions, history, timers, and Q-SYS control events.
+Navigator is a Q-SYS UCI navigation runtime. It turns one flat authored project table into deterministic UCI layer visibility, access state, keypad/session timing, history state, and Q-SYS control bindings.
 
-The core design is ownership. Pages are not just buttons that show layers; they belong to groups, groups belong to other lifecycle owners, and regions live only while their owners are active. From that ownership graph, Navigator can decide which layers should be visible at any moment and which controls should change the current state.
-
-## Mental Model
-
-Navigator reduces a UCI to four authored concepts:
-
-- `groups`: lifecycle containers. A group decides whether its pages are mutually exclusive or independent.
-- `pages`: navigable states. A page contributes visible layer content and can own child groups.
-- `regions`: optional owner-scoped presentation areas. A region has default content and may be filled by active pages.
-- `access`: the current access level. Access chooses entry pages, content variants, keypad behavior, and timeout behavior.
-
-The runtime continuously reconciles the desired visible layers from those concepts. It does not rely on old layer state; each navigation change computes the current desired set and writes Q-SYS layer visibility from that set.
+The core model is ownership. Pages and groups are top-level entries, and each one names its owner explicitly. Groups decide how their direct members behave. Pages contribute visible UCI layers. Access levels choose which group becomes active first.
 
 ## Runtime Shape
 
-Authored projects are compiled before they are applied:
+Navigator is applied directly to the authored project:
 
 ```lua
 local Navigator = require("Navigator")
 
-local config = Navigator.compile({
-  -- authored project
+Navigator.apply({
+  -- project table
 })
-
-Navigator.apply(config)
 ```
 
-`Navigator.compile(project)` expands authoring constructors, typed references, access entries, layer names, and control-name strings into runtime tables. `Navigator.apply(config)` validates the compiled model, binds Q-SYS controls, initializes timers, resets the configured access-level control to `locked`, and opens the configured entry page.
+In local tooling, `require("Navigator")` is convenient. In Q-SYS, built-in `require` is documented for Q-SYS-supplied modules such as `rapidjson`; project-local Lua files are not documented as a built-in module mechanism. If `Navigator.lua` is not available to Q-SYS through `require`, load it before the project table by whatever deployment approach your project uses.
 
-The compiled config exposes handles under:
+There is no separate preprocessing step. The authoring helpers `group(...)` and `page(...)` mark top-level tables so `Navigator.apply(...)` can partition, normalize, validate, bind controls, and start from locked access.
+
+## Core Filesystem Loader
+
+`qsys-require.lua` is a minimal Lua 5.3 utility for testing whether a Q-SYS script can load project libraries from the Core filesystem. It expects the target file to end with `return aModule`.
 
 ```lua
-config.groups
-config.pages
-config.regions
+local function loadModule(path)
+  local file = assert(io.open(path, "r"))
+  local source = file:read("*a")
+  file:close()
+
+  return assert(load(source, "@" .. path))()
+end
+
+local Navigator = loadModule("/design/lua/Navigator.lua")
 ```
 
-Those handles are valid for custom code:
-
-```lua
-Navigator.open(config.pages.audio)
-Navigator.close(config.pages.audio)
-```
-
-String ids are also available for diagnostic code:
-
-```lua
-Navigator.openPage("audio")
-Navigator.closePage("audio")
-```
+This is not a replacement for Q-SYS built-in `require`; it is a small file-loader pattern for project-owned Lua files when the Core exposes the path to script code.
 
 ## Authoring Surface
 
-Navigator exposes a compact authoring API when `Navigator.lua` is loaded:
+Navigator exposes:
 
 ```lua
 group(spec)
-group(spec, pages)
 page(spec)
-region(spec)
 
-groups.*
-pages.*
-regions.*
-
-interlocked
-independent
+Navigator.apply(project)
+Navigator.setAccess(accessLevel)
+Navigator.open(pageId)
+Navigator.close(pageId)
+Navigator.back()
+Navigator.forward()
+Navigator.getState()
+Navigator.getVisibleLayers()
 ```
 
-Table keys become object ids:
+`group` and `page` are also exposed globally for compact project scripts:
 
 ```lua
-session = group({ owner = groups.root, mode = independent })
-
-system = group(
-  { owner = groups.session, mode = interlocked, startAt = pages.home },
-  {
-    home = page({ content = "Home" }),
-    audio = page({ content = "Audio" }),
-  }
-)
+system = group({ owner = "session", mode = "interlocked", startAt = "home" })
+home = page({ owner = "system", content = "Home" })
 ```
 
-`groups.session`, `pages.audio`, and `regions.footer` are typed references. They let the compiler validate relationships before the runtime starts.
+IDs are the string keys in the project table. Custom handlers use those same string IDs:
+
+```lua
+Navigator.open("audio")
+Navigator.close("help")
+Navigator.setAccess("admin")
+```
+
+## Project Table
+
+A project table may contain:
+
+```lua
+{
+  uci = { pageName = "Main", transition = "none" },
+  logging = {},
+  access = {},
+  accessControls = {},
+  historyControls = {},
+  historyMaxEntries = 25,
+
+  someGroup = group({ ... }),
+  somePage = page({ ... }),
+}
+```
+
+Only top-level entries returned by `group(...)` or `page(...)` become navigation objects. Other keys are configuration tables.
 
 ## Groups
 
-A group is a lifecycle container with an owner and a mode:
+A group is a container with an owner, a mode, optional defaults, and optional page-owner visibility behavior:
 
 ```lua
-group({
-  owner = groups.session, -- groups.root, another group, or a page
-  mode = interlocked,     -- or independent
-  startAt = pages.home,   -- optional
-  parentVisible = true,   -- only meaningful for page-owned groups
+system = group({
+  owner = "session",
+  mode = "interlocked",
+  startAt = "home",
 })
 ```
 
-`groups.root` is the built-in root owner. It behaves as the top of the lifecycle tree, so direct root-owned groups interlock with one another.
+Owners are strings:
 
-`interlocked` means only one page in the group is active at a time. Opening a page in that group closes the previous active sibling.
+- `"root"` for a top-level group.
+- another group ID for deeper hierarchy.
+- a page ID for page-owned subpage groups.
 
-`independent` means pages in the group may coexist. Opening one page does not automatically close its siblings.
+`mode` is required:
 
-`startAt` marks the page a group should open when that group becomes active through access entry or parent lifecycle.
+- `interlocked`: one direct member can be active at a time.
+- `independent`: multiple direct members can be active at once.
 
-Page-owned groups are useful for subpages. `parentVisible = true` keeps the owning page visible while the child group is active. `parentVisible = false` lets the child group replace the owner page visually.
+The implicit `"root"` owner behaves as interlocked, so direct root-owned groups replace one another.
+
+### startAt
+
+`group.startAt` names the direct member or members that open when the group activates.
+
+For an interlocked group:
+
+```lua
+system = group({ owner = "session", mode = "interlocked", startAt = "home" })
+```
+
+An interlocked group may name only one direct member.
+
+For an independent group:
+
+```lua
+session = group({
+  owner = "root",
+  mode = "independent",
+  startAt = { "frame", "system" },
+})
+```
+
+An independent group may name one ID or a list of direct page/group IDs. Mixed page and group defaults are allowed as long as every ID is a direct member of that group.
+
+### Page-Owned Groups
+
+Page-owned groups model subpages:
+
+```lua
+audioSubpages = group({
+  owner = "audio",
+  mode = "interlocked",
+  parentVisible = true,
+  startAt = "audioRouting",
+})
+```
+
+`parentVisible` is required for page-owned groups:
+
+- `true`: keep the owner page visible while the owned group is active.
+- `false`: suppress the owner page while the owned group is active.
+
+`parentVisible` is invalid on root-owned or group-owned groups.
 
 ## Pages
 
-A page contributes visible content and optional controls:
+A page has an owner, content, and optional controls:
 
 ```lua
-audio = page({ content = "Audio", controls = { open = "Open Audio Page" } })
+audio = page({
+  owner = "system",
+  content = { user = "Audio", admin = "Admin Audio" },
+  controls = { open = "Open Audio Page" },
+})
 ```
+
+`owner` must be a group ID.
 
 `content` may be:
 
@@ -124,75 +180,65 @@ audio = page({ content = "Audio", controls = { open = "Open Audio Page" } })
 - a list of layer names
 - an access-keyed table
 
+Examples:
+
 ```lua
-audioSettings = page({
-  content = {
-    user = { "Audio Settings", regions.footer("Audio Settings Footer") },
-    admin = { "Audio Settings", "Audio Admin Tools" },
-  },
-  controls = { open = "Open Audio Settings" },
+home = page({ owner = "system", content = "Home" })
+
+frame = page({
+  owner = "session",
+  content = { "Header", "Footer", "Background" },
 })
-```
 
-For custom unlocked access levels, content falls back to the level marked `default = true` when that page or region does not define content for the current access level. Locked access does not use that fallback.
-
-## Regions
-
-Regions are optional lifecycle objects like groups. A region exists only while its owner is active, and the `content` assigned in the region constructor is its default:
-
-```lua
-regions = {
-  header = region({ owner = groups.session, content = "Header" }),
-  footer = region({ owner = groups.session, content = "Footer" }),
-}
-```
-
-Pages fill regions by calling the region reference inside page content:
-
-```lua
-audioSettings = page({
+audio = page({
+  owner = "system",
   content = {
-    "Audio Settings",
-    regions.footer("Audio Settings Footer"),
+    user = "Audio",
+    admin = "Admin Audio",
   },
 })
 ```
 
-Page fills override region defaults. Deeper active pages win over shallower active pages. Same-depth fills for the same region are treated as a configuration/runtime conflict and error rather than guessing.
-
-This rule lets broad defaults live on the session, while specific pages temporarily replace the shared header, footer, ribbon, background, or other chrome.
+For unlocked access levels, missing content falls back to the access level marked `default = true`. Locked access does not fall back to unlocked content.
 
 ## Access
 
-The authored `access` table is keyed by access level:
+The `access` table is keyed by access level:
 
 ```lua
 access = {
-  locked = { startAt = pages.splash, keypad = pages.keypad, pinEntryTimeoutSeconds = 30 },
-  user = { startAt = pages.home, sessionTimeoutSeconds = 600, default = true },
-  admin = {},
+  locked = {
+    startAt = "accessGate",
+    keypad = "keypad",
+    pinEntryTimeoutSeconds = 30,
+  },
+  user = {
+    startAt = "session",
+    sessionTimeoutSeconds = 600,
+    default = true,
+  },
+  admin = {
+    startAt = "session",
+    sessionTimeoutSeconds = 600,
+  },
 }
 ```
 
 Rules:
 
-- `locked` is required and reserved for locked access.
-- One unlocked level should set `default = true`.
-- `locked.startAt` defines the locked entry page.
-- `locked.keypad`, when present, must reference a locked page.
-- Unlocked access levels can define `startAt` and `sessionTimeoutSeconds`.
-- Custom unlocked levels can omit content and fall back to the default unlocked level.
+- `locked` is the reserved locked access level.
+- One non-locked level must set `default = true`.
+- `access.<level>.startAt` names one group ID.
+- `locked.keypad`, when present, names a page under the locked root group.
+- `pinEntryTimeoutSeconds` returns from keypad to locked access.
+- `sessionTimeoutSeconds` returns from unlocked access to locked access.
 - Access changes clear history.
 
-`admin` is only an example access level. Projects may define whatever unlocked levels they need as long as one unlocked level is the default.
-
-On startup, Navigator sets the configured access-level control to `locked` as one of its first actions. This prevents a restarted script from inheriting a stale logged-in Q-SYS control value.
-
-If the keypad times out, Navigator locks. If the unlocked session times out, Navigator locks.
+At startup, Navigator sets the configured access-level control to `locked` before startup navigation. This prevents a restarted script from inheriting a stale logged-in value from Q-SYS control state.
 
 ## Access Controls
 
-`accessControls` binds global Q-SYS controls:
+Global access controls are configured under `accessControls`:
 
 ```lua
 accessControls = {
@@ -203,19 +249,19 @@ accessControls = {
 }
 ```
 
-`level` is the external access-level bridge. Navigator writes it to `locked` at startup and reads it when the keypad flow completes.
+`level` is the external access-level bridge. Navigator writes it to `locked` at startup and reads it when the control changes.
 
-`change` is a change-access-level request. With a keypad configured, it always takes the user to the keypad. If the current access level is not locked, Navigator locks first so the keypad starts from the locked side of the boundary. Without a keypad, it changes directly to the default unlocked access level.
+`change` requests an access change. With a keypad configured, it always opens the keypad. If the current access is not locked, Navigator locks first and then opens the keypad. Without a keypad, it changes directly to the default unlocked access level.
 
-`lock` immediately returns to locked access.
+`lock` returns to locked access.
 
-`activityPulse` restarts active keypad or session timers.
+`activityPulse` restarts active keypad and session timers.
 
-Each entry may be a single control name or a list of equivalent control names.
+Each control may be a control name string, a Q-SYS control object, or a list of equivalent control names/objects.
 
 ## Page And History Controls
 
-Page controls are authored on the page:
+Page controls live on pages:
 
 ```lua
 controls = {
@@ -235,20 +281,22 @@ historyControls = {
 }
 ```
 
-Navigation changes push history unless the change is itself a history traversal or access transition. Access changes clear history because the visible state may no longer be valid under the new access level.
+Navigation changes push history when the visible page/group state changes. Access changes clear history because active pages may not be valid under the new access level.
+
+`historyMaxEntries` defaults to `25`. Set it to `false` to disable trimming.
 
 ## Visibility Resolution
 
-On each navigation change, Navigator computes desired layers in this order:
+On each navigation change, Navigator computes the desired layer set from state:
 
-1. Determine the active owner tree from root, groups, pages, and page-owned groups.
-2. Select page content for the current access level.
-3. Suppress an owner page when an active child group has `parentVisible = false`.
-4. Determine which regions are active from their owners.
-5. Apply region defaults or the most specific active page fill.
-6. Write Q-SYS layer visibility from the final desired set.
+1. Start with the active page and group sets.
+2. Hide an owner page if an active page-owned group has `parentVisible = false`.
+3. Resolve each active page's content for the effective access level.
+4. Apply visibility changes to Q-SYS layers.
 
-This makes visibility an output of the model, not an accumulation of previous button presses.
+Visibility is derived from current state. It is not an accumulation of previous button presses.
+
+Locked pages always resolve locked content, even if the current access is temporarily unlocked during an access transition. Unlocked pages resolve the current access level and fall back to the default unlocked level when needed.
 
 ## Logging
 
@@ -259,67 +307,61 @@ logging = {
   access = true,
   navigation = true,
   history = true,
-  keypad = true,
   timeout = true,
   controls = true,
+  qsys = true,
   manifest = true,
 }
 ```
 
-`manifest = true` prints the configured Q-SYS layer names and authored control names when `Navigator.apply(config)` runs. It is the fastest way to verify that the authored project names match the UCI.
+`manifest = true` prints configured Q-SYS layer names and control names when `Navigator.apply(...)` runs.
+
+`qsys = true` wraps UCI layer visibility calls so Q-SYS layer errors include the UCI page name, layer name, requested visibility, and original error.
 
 ## Validation
 
-Navigator validates before applying config and continues to assert runtime conflicts that depend on active state.
+Navigator validates before startup:
 
-Compile/apply validation includes:
+- group and page IDs are non-empty strings
+- group and page IDs do not collide
+- group modes are `interlocked` or `independent`
+- every group and page has a valid owner
+- group ownership has no cycles
+- access start groups exist
+- locked access has at least one default locked page through its start group
+- keypad page exists, is under the locked root group, and has locked content
+- page-owned groups set `parentVisible`
+- non-page-owned groups do not set `parentVisible`
+- interlocked groups have at most one `startAt` member
+- every `group.startAt` member is a direct page or group member
+- page content references declared access levels
+- controls use supported keys
+- named controls exist in `Controls`
 
-- unknown page, group, or region references
-- duplicate page, group, or region ids
-- invalid group modes
-- invalid owners
-- invalid `startAt` pages
-- page-owned group rules
-- region fills for unknown regions
-- unsupported page or global control names
-- missing Q-SYS controls when `Controls` is available
-- missing or invalid access definitions
-- invalid keypad page placement
+Runtime assertions catch invalid navigation, such as opening an unknown page or opening a page unavailable at the current access level.
 
-Runtime validation includes same-depth active region fill conflicts. Navigator errors in that case because neither fill is more specific than the other.
+## Basic Shape
 
-## Usage Patterns
-
-A typical keyed project uses two root-level containers:
-
-```lua
-gate = group({ owner = groups.root, mode = independent })
-session = group({ owner = groups.root, mode = independent })
-```
-
-`gate` owns locked pages through an interlocked `accessGate` group:
+A keyed project commonly uses a locked entry side and an unlocked session side:
 
 ```lua
-accessGate = group(
-  { owner = groups.gate, mode = interlocked, startAt = pages.splash },
-  {
-    splash = page({ content = { locked = "Splash" } }),
-    keypad = page({ content = { locked = "Keypad" } }),
-  }
-)
+entry = group({ owner = "root", mode = "independent" })
+accessGate = group({ owner = "entry", mode = "interlocked", startAt = "splash" })
+
+session = group({
+  owner = "root",
+  mode = "independent",
+  startAt = { "frame", "system" },
+})
+
+system = group({ owner = "session", mode = "interlocked", startAt = "home" })
+
+splash = page({ owner = "accessGate", content = { locked = "Splash" } })
+keypad = page({ owner = "accessGate", content = { locked = "Keypad" } })
+frame = page({ owner = "session", content = { "Header", "Footer", "Background" } })
+home = page({ owner = "system", content = "Home" })
 ```
 
-`session` owns unlocked pages and optional regions:
+`access.locked.startAt = "accessGate"` enters the locked gate. `access.user.startAt = "session"` enters the unlocked session. `session.startAt = { "frame", "system" }` opens persistent frame layers and the primary interlocked system group together.
 
-```lua
-system = group(
-  { owner = groups.session, mode = interlocked, startAt = pages.home },
-  {
-    home = page({ content = "Home" }),
-    audio = page({ content = "Audio" }),
-  }
-)
-```
-
-Use independent groups for overlays, tools, dialogs, and other pages that can coexist. Use interlocked groups for tab sets, route destinations, and any surface where one active page should replace another.
-196
+Use independent groups for frames, tools, overlays, dialogs, and coexistence. Use interlocked groups for tabs, main destinations, or any direct members that should replace one another.
