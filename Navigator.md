@@ -28,15 +28,15 @@ Navigator calls these navigation states `pages`, but it does not manage Q-SYS UC
 A passcode protected project commonly uses a locked gate side and an unlocked session side:
 
 ```lua
-accessGate = group({ owner = "root", mode = "interlocked", startAt = "splash" })
+accessGate = group({ owner = "root", mode = "switch", startAt = "splash" })
 
 session = group({
   owner = "root",
-  mode = "independent",
+  mode = "stack",
   startAt = { "frame", "system" },
 })
 
-system = group({ owner = "session", mode = "interlocked", startAt = "home" })
+system = group({ owner = "session", mode = "switch", startAt = "home" })
 
 splash = page({ owner = "accessGate", content = { locked = "Splash" } })
 keypad = page({ owner = "accessGate", content = { locked = "Keypad" } })
@@ -45,9 +45,9 @@ home = page({ owner = "system", content = "Home" })
 settings = page({ owner = "system", content = "Settings" })
 ```
 
-`access.locked.startAt = "accessGate"` enters the locked gate. `access.user.startAt = "session"` enters the unlocked session. `session.startAt = { "frame", "system" }` opens persistent frame layers and the primary interlocked system group together.
+`access.locked.startAt = "accessGate"` enters the locked gate. `access.user.startAt = "session"` enters the unlocked session. `session.startAt = { "frame", "system" }` opens persistent frame layers and the primary switch system group together.
 
-Use independent groups for frames, tools, overlays, modals, dialogs, and coexistence. Use interlocked groups for tabs, main destinations, or any directly owned pages or groups that should replace one another.
+Use stack groups for frames, tools, overlays, modals, dialogs, and coexistence. Use switch groups for tabs, main destinations, or any directly owned pages or groups that should replace one another.
 
 ## Startup And Runtime
 
@@ -82,7 +82,7 @@ Navigator uses strings for two different things, so keep the categories separate
 ```lua
 MyGroupId = group({
   owner = "root",          -- owner ID: built-in root owner
-  mode = "interlocked",
+  mode = "switch",
   startAt = "MyPageId",    -- Navigator page ID
 })
 
@@ -124,7 +124,7 @@ startAt = "MyPageId"
 startAt = { "MyFramePageId", "MySystemGroupId" }
 ```
 
-For an `interlocked` group, `startAt` must be one directly owned page or group ID. For an `independent` group, `startAt` may be one directly owned page/group ID or a list of directly owned page/group IDs.
+For a `switch` group, `startAt` must be one directly owned page or group ID. For a `stack` group, `startAt` may be one directly owned page/group ID or a list of directly owned page/group IDs.
 
 `page.content`:
 
@@ -168,7 +168,7 @@ Navigator.getVisibleLayers()
 `group` and `page` are also exposed globally for compact project scripts:
 
 ```lua
-MyGroupId = group({ owner = "root", mode = "interlocked", startAt = "MyPageId" })
+MyGroupId = group({ owner = "root", mode = "switch", startAt = "MyPageId" })
 MyPageId = page({ owner = "MyGroupId", content = "My Q-SYS Layer Name" })
 ```
 
@@ -207,7 +207,7 @@ A group is a container with an owner, a mode, optional defaults, and optional pa
 ```lua
 MyGroupId = group({
   owner = "root",
-  mode = "interlocked",
+  mode = "switch",
   startAt = "MyPageId",
 })
 ```
@@ -220,36 +220,36 @@ Owners are strings:
 
 `mode` is required:
 
-- `interlocked`: one directly owned page or group can be active at a time.
-- `independent`: multiple directly owned pages and groups can be active at once.
+- `switch`: one directly owned page or group can be active at a time.
+- `stack`: multiple directly owned pages and groups can be active at once.
 
-The implicit `"root"` owner behaves as interlocked, so direct root-owned groups replace one another.
+The implicit `"root"` owner behaves like `switch`, so direct root-owned groups replace one another.
 
-Use `interlocked` for tab sets, main destinations, route pages, and any set where opening one directly owned page or group should close the others. Use `independent` for persistent frames, tool panels, overlays, modals, dialogs, and any directly owned pages or groups that should coexist.
+Use `switch` for tab sets, main destinations, route pages, and any set where opening one directly owned page or group should close the others. Use `stack` for persistent frames, tool panels, overlays, modals, dialogs, and any directly owned pages or groups that should coexist.
 
 ### startAt
 
-`group.startAt` names the directly owned page or group that opens when the group activates. In an independent group, it may name a list of directly owned pages and groups.
+`group.startAt` names the directly owned page or group that opens when the group activates. In a `stack` group, it may name a list of directly owned pages and groups.
 
-For an interlocked group:
+For a `switch` group:
 
 ```lua
-MyGroupId = group({ owner = "root", mode = "interlocked", startAt = "MyPageId" })
+MyGroupId = group({ owner = "root", mode = "switch", startAt = "MyPageId" })
 ```
 
-An interlocked group may name only one directly owned page or group.
+A `switch` group may name only one directly owned page or group.
 
-For an independent group:
+For a `stack` group:
 
 ```lua
 MySessionGroupId = group({
   owner = "root",
-  mode = "independent",
+  mode = "stack",
   startAt = { "MyFramePageId", "MySystemGroupId" },
 })
 ```
 
-An independent group may name one ID or a list of directly owned page/group IDs. Mixed page and group defaults are allowed as long as every ID is directly owned by that group.
+A `stack` group may name one ID or a list of directly owned page/group IDs. Mixed page and group defaults are allowed as long as every ID is directly owned by that group.
 
 If `startAt` is omitted, activating the group activates only the group container. No page or owned group opens automatically. This can be useful for optional tool groups and modals that should stay dormant until a control opens them.
 
@@ -260,7 +260,7 @@ Page-owned groups model subpages:
 ```lua
 MySubpageGroupId = group({
   owner = "MyParentPageId",
-  mode = "interlocked",
+  mode = "switch",
   parentVisible = true,
   startAt = "MySubpageId",
 })
@@ -341,19 +341,41 @@ access = {
 
 `locked`, `user`, and `admin` are all authored access levels in the same table. The difference is that `locked` is the reserved key Navigator uses for the locked side of the interface. You author its `startAt`, content, keypad, and timeout behavior like the other levels, but the key itself must be `locked`.
 
+`locked` is optional. If it exists, Navigator starts at locked access. If it does not exist, Navigator starts at the default access level.
+
 Rules:
 
-- `locked` is required and reserved; it cannot be renamed.
+- `locked` is optional and reserved; it cannot be renamed.
 - One non-locked level must set `default = true`.
 - `access.<level>.startAt` names one group ID.
 - `locked.keypad`, when present, names a page under the locked root group.
-- `pinEntryTimeoutSeconds` returns from keypad to locked access.
-- `sessionTimeoutSeconds` returns from unlocked access to locked access.
+- `pinEntryTimeoutSeconds` returns from keypad to locked access and requires `locked.keypad`.
+- `sessionTimeoutSeconds` returns from unlocked access to locked access and requires `locked`.
+- `accessControls.lock` requires `locked`.
 - Access changes clear history.
 
 Access primarily controls content selection. A page can show different Q-SYS layers at `user` and `admin`, and it can be unavailable at an access level by omitting both that level and the default fallback. Access also controls startup location by activating the configured `startAt` group.
 
-At startup, Navigator sets the configured access-level control to `locked` before startup navigation. This prevents a restarted script from inheriting a stale logged-in value from Q-SYS control state.
+At startup, Navigator sets the configured access-level control to the startup access level before startup navigation. This prevents a restarted script from inheriting a stale value from Q-SYS control state.
+
+For a project with no lockscreen and no keypad, omit `locked` entirely:
+
+```lua
+access = {
+  user = { startAt = "session", default = true },
+}
+
+session = group({
+  owner = "root",
+  mode = "stack",
+  startAt = { "frame", "system" },
+})
+
+system = group({ owner = "session", mode = "switch", startAt = "home" })
+
+frame = page({ owner = "session", content = "Frame" })
+home = page({ owner = "system", content = "Home" })
+```
 
 ## Access Controls
 
@@ -368,7 +390,7 @@ accessControls = {
 }
 ```
 
-`level` is the external access-level bridge. Navigator writes it to `locked` at startup and reads it when the control changes.
+`level` is the external access-level bridge. Navigator writes it to the startup access level at startup and reads it when the control changes.
 
 `change` requests an access change. With a keypad configured, it always opens the keypad. If the current access is not locked, Navigator locks first and then opens the keypad. Without a keypad, it changes directly to the default unlocked access level.
 
@@ -385,8 +407,8 @@ accessControls = {
   lock = "Lock Request",
 }
 
-accessGate = group({ owner = "root", mode = "interlocked", startAt = "splash" })
-session = group({ owner = "root", mode = "interlocked", startAt = "home" })
+accessGate = group({ owner = "root", mode = "switch", startAt = "splash" })
+session = group({ owner = "root", mode = "switch", startAt = "home" })
 
 splash = page({ owner = "accessGate", content = { locked = "Splash" } })
 home = page({ owner = "session", content = "Home" })
@@ -394,7 +416,7 @@ home = page({ owner = "session", content = "Home" })
 
 Pressing `Continue` changes access from `locked` to the default unlocked level, then activates `session`.
 
-`lock` returns to locked access.
+`lock` returns to locked access and requires `access.locked`.
 
 `activityPulse` restarts active keypad and session timers.
 
@@ -471,15 +493,16 @@ Navigator validates before startup:
 
 - group and page IDs are non-empty strings
 - group and page IDs do not collide
-- group modes are `interlocked` or `independent`
+- group modes are `switch` or `stack`
 - every group and page has a valid owner
 - group ownership has no cycles
 - access start groups exist
-- locked access has at least one default locked page through its start group
-- keypad page exists, is under the locked root group, and has locked content
+- locked access, when authored, has at least one default locked page through its start group
+- keypad page, when authored, exists, is under the locked root group, and has locked content
+- lock controls and session timeouts require locked access
 - page-owned groups set `parentVisible`
 - non-page-owned groups do not set `parentVisible`
-- interlocked groups have at most one `startAt` page or group
+- switch groups have at most one `startAt` page or group
 - every `group.startAt` page or group is directly owned by that group
 - page content references declared access levels
 - controls use supported keys

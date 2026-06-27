@@ -44,43 +44,43 @@ Navigator.apply({
     forward = "Forward", -- navigate to next state
   },
 
-  -- accessGate is interlocked so splash and keypad replace each other inside gate.
+  -- accessGate switches between splash and keypad.
   accessGate = group({
     owner = "root",
-    mode = "interlocked",
+    mode = "switch",
     startAt = "splash"
   }),
 
   -- Session is the root-owned container for unlocked pages.
   session = group({ 
     owner = "root", 
-    mode = "independent",
+    mode = "stack",
     startAt = { "frame", "system" }
   }),
 
-  -- Tools are independent utility pages within the session.
+  -- Tools stack utility pages within the session.
   tools = group({ 
     owner = "session", 
-    mode = "independent" 
+    mode = "stack" 
   }),
 
-  -- System is the primary interlocked page group.
+  -- System switches between primary pages.
   system = group({
     owner = "session",
-    mode = "interlocked",
+    mode = "switch",
     startAt = "home"
   }),
 
   audioSubpages = group({
     owner = "audio",
-    mode = "interlocked",
+    mode = "switch",
     parentVisible = true,
     startAt = "audioRouting"
   }),
   
   videoSubpages = group({
     owner = "video",
-    mode = "independent",
+    mode = "stack",
     parentVisible = false,
   }),
 

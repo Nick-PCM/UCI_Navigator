@@ -8,7 +8,7 @@ Navigator uses the word `page` for a navigation state. The Q-SYS assets it actua
 
 Q-SYS UCIs often start as direct button-to-layer scripts. That becomes hard to maintain when a design needs:
 
-- interlocked sections, tabs, or destinations
+- switching sections, tabs, or destinations
 - persistent frame layers such as headers, footers, ribbons, and backgrounds
 - tool panels, overlays, dialogs, or modals that can coexist with other pages
 - locked and unlocked views
@@ -30,13 +30,13 @@ Navigator projects use explicit ownership:
 - Control strings are Q-SYS control names.
 
 ```lua
-MyGroupId = group({ owner = "root", mode = "interlocked", startAt = "MyPageId" })
+MyGroupId = group({ owner = "root", mode = "switch", startAt = "MyPageId" })
 MyPageId = page({ owner = "MyGroupId", content = "My Q-SYS Layer Name" })
 ```
 
 ## Key Capabilities
 
-- Interlocked and independent groups.
+- Switch and stack groups.
 - Group-owned and page-owned subnavigation.
 - Access-specific content, with fallback to the default unlocked access level.
 - Locked access with optional keypad.
@@ -57,7 +57,9 @@ MyPageId = page({ owner = "MyGroupId", content = "My Q-SYS Layer Name" })
 
 ## Start Here
 
-Read [Navigator.md](Navigator.md) for the model and API details, then compare it with [example-uci.lua](example-uci.lua). The example shows the current authored style with locked access, a keypad, persistent frame layers, an interlocked system group, independent tools, and page-owned subpages.
+Read [Navigator.md](Navigator.md) for the model and API details, then compare it with [example-uci.lua](example-uci.lua). The example shows the current authored style with locked access, a keypad, persistent frame layers, a switch system group, stack tools, and page-owned subpages.
+
+Locked access is optional. A project with no lockscreen can omit `access.locked`; Navigator starts at the default access level instead.
 
 ## Q-SYS Without Require
 
@@ -77,9 +79,9 @@ end
 local project = {
   uci = { pageName = "Main" },
 
-  accessGate = group({ owner = "root", mode = "interlocked", startAt = "splash" }),
-  session = group({ owner = "root", mode = "independent", startAt = { "frame", "system" } }),
-  system = group({ owner = "session", mode = "interlocked", startAt = "home" }),
+  accessGate = group({ owner = "root", mode = "switch", startAt = "splash" }),
+  session = group({ owner = "root", mode = "stack", startAt = { "frame", "system" } }),
+  system = group({ owner = "session", mode = "switch", startAt = "home" }),
 
   splash = page({ owner = "accessGate", content = { locked = "Splash" } }),
   frame = page({ owner = "session", content = "Frame" }),
