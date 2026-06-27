@@ -82,7 +82,6 @@ Navigator.apply({
     owner = "video",
     mode = "independent",
     parentVisible = false,
-    startAt = "videoRouting"
   }),
 
   splash = page({
@@ -155,7 +154,7 @@ Navigator.apply({
   videoRouting = page({
     owner = "videoSubpages",
     content = "Video Routing",
-    controls = { open = "Open Video Routing", close = "Close Video Settings" }
+    controls = { open = "Open Video Routing", close = "Close Video Routing" }
   }),
 
   videoSettings = page({ 
