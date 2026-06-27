@@ -1,5 +1,5 @@
 
-local Navigator = require("Navigator")
+local Navigator = require("Navigator") -- remove in Q-Sys
 
 Navigator.apply({
   uci = { pageName = "Main" },

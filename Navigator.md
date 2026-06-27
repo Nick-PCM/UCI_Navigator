@@ -1,6 +1,6 @@
 # Navigator
 
-Navigator is a Q-SYS UCI navigation runtime. It turns an explicitly authored ownership model into deterministic UCI layer visibility, access state, keypad/session timing, history state, and Q-SYS control bindings.
+Navigator controls which Q-SYS UCI layers are visible as a user moves through a touchscreen interface. It gives the project one place to define pages, groups, access levels, keypad behavior, history controls, and button bindings.
 
 The core model is ownership. Pages and groups are top-level entries, and each one names its owner explicitly. Groups decide how their directly owned pages and groups behave. Pages contribute visible UCI layers through `content`. Access levels decide which page content is eligible to show, which content variant to use, which group becomes active first, and when the interface should return to locked access.
 
@@ -8,26 +8,48 @@ Navigator calls these navigation states `pages`, but it does not manage Q-SYS UC
 
 ## Table Of Contents
 
-- [Navigator](#navigator)
-  - [Table Of Contents](#table-of-contents)
-  - [Runtime Shape](#runtime-shape)
-  - [IDs And Q-SYS Names](#ids-and-q-sys-names)
-  - [Value Shapes](#value-shapes)
-  - [Authoring Surface](#authoring-surface)
-  - [Project Table](#project-table)
-  - [Groups](#groups)
-    - [startAt](#startat)
-    - [Page-Owned Groups](#page-owned-groups)
-  - [Pages](#pages)
-  - [Access](#access)
-  - [Access Controls](#access-controls)
-  - [Page And History Controls](#page-and-history-controls)
-  - [Visibility Resolution](#visibility-resolution)
-  - [Logging](#logging)
-  - [Validation](#validation)
-  - [Basic Shape](#basic-shape)
+- [Project Shape](#project-shape)
+- [Startup And Runtime](#startup-and-runtime)
+- [IDs And Q-SYS Names](#ids-and-q-sys-names)
+- [Value Shapes](#value-shapes)
+- [Authoring Surface](#authoring-surface)
+- [Project Table](#project-table)
+- [Groups](#groups)
+- [Pages](#pages)
+- [Access](#access)
+- [Access Controls](#access-controls)
+- [Page And History Controls](#page-and-history-controls)
+- [Visibility Resolution](#visibility-resolution)
+- [Logging](#logging)
+- [Validation](#validation)
 
-## Runtime Shape
+## Project Shape
+
+A passcode protected project commonly uses a locked gate side and an unlocked session side:
+
+```lua
+accessGate = group({ owner = "root", mode = "interlocked", startAt = "splash" })
+
+session = group({
+  owner = "root",
+  mode = "independent",
+  startAt = { "frame", "system" },
+})
+
+system = group({ owner = "session", mode = "interlocked", startAt = "home" })
+
+splash = page({ owner = "accessGate", content = { locked = "Splash" } })
+keypad = page({ owner = "accessGate", content = { locked = "Keypad" } })
+frame = page({ owner = "session", content = { "Header", "Footer", "Background", "Ribbon" } })
+home = page({ owner = "system", content = "Home" })
+settings = page({ owner = "system", content = "Settings" })
+```
+
+`access.locked.startAt = "accessGate"` enters the locked gate. `access.user.startAt = "session"` enters the unlocked session. `session.startAt = { "frame", "system" }` opens persistent frame layers and the primary interlocked system group together.
+
+Use independent groups for frames, tools, overlays, modals, dialogs, and coexistence. Use interlocked groups for tabs, main destinations, or any directly owned pages or groups that should replace one another.
+
+## Startup And Runtime
 
 Navigator's runtime starts with `Navigator.apply(projectTable)`. `apply` is the boundary between authoring and runtime behavior: before it returns, Navigator has validated the project, built lookup indexes, initialized state, and written the initial Q-SYS layer visibility.
 
@@ -464,28 +486,3 @@ Navigator validates before startup:
 - named controls exist in `Controls`
 
 Runtime assertions catch invalid navigation, such as opening an unknown page or opening a page unavailable at the current access level.
-
-## Basic Shape
-
-A passcode protected project commonly uses a locked gate side and an unlocked session side:
-
-```lua
-accessGate = group({ owner = "root", mode = "interlocked", startAt = "splash" })
-
-session = group({
-  owner = "root",
-  mode = "independent",
-  startAt = { "frame", "system" },
-})
-
-system = group({ owner = "session", mode = "interlocked", startAt = "home" })
-
-splash = page({ owner = "accessGate", content = { locked = "Splash" } })
-keypad = page({ owner = "accessGate", content = { locked = "Keypad" } })
-frame = page({ owner = "session", content = { "Header", "Footer", "Background" } })
-home = page({ owner = "system", content = "Home" })
-```
-
-`access.locked.startAt = "accessGate"` enters the locked gate. `access.user.startAt = "session"` enters the unlocked session. `session.startAt = { "frame", "system" }` opens persistent frame layers and the primary interlocked system group together.
-
-Use independent groups for frames, tools, overlays, modals, dialogs, and coexistence. Use interlocked groups for tabs, main destinations, or any directly owned pages or groups that should replace one another.
