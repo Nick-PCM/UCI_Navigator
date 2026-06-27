@@ -428,7 +428,7 @@ historyControls = {
 }
 ```
 
-Navigation changes push history when the visible page/group state changes. Access changes clear history because active pages may not be valid under the new access level.
+Page open/close changes push history when the visible page/group state changes. Access changes clear history because active pages may not be valid under the new access level. Mechanical access flow, such as opening the keypad from the access change control, does not add a history entry.
 
 `historyMaxEntries` defaults to `25`. Set it to `false` to disable trimming.
 

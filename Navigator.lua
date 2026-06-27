@@ -79,10 +79,10 @@ local function sameSet(a, b)
   return true
 end
 
--- Determines whether a navigation operation actually changed visible state.
-local function sameSnapshot(a, b)
-  return sameSet(a.activePageIds, b.activePageIds)
-     and sameSet(a.activeGroupIds, b.activeGroupIds)
+-- Compares a saved snapshot to the current active page/group state.
+local function snapshotMatchesCurrent(snapshot)
+  return sameSet(snapshot.activePageIds, state.activePageIds)
+     and sameSet(snapshot.activeGroupIds, state.activeGroupIds)
 end
 
 -- Distinguishes a multi-control alias list from a single Q-SYS control object.
@@ -126,7 +126,7 @@ end
 
 -- Identifies pages that should resolve locked views regardless of active access.
 local function pageIsInLockedGroup(pageId)
-  return groupIsUnder(config.pages[pageId].owner, config.access.lockedGroupId)
+  return config.pages[pageId].lockedView == true
 end
 
 -- Chooses the access level a page should use for its view lookup.
@@ -158,7 +158,7 @@ end
 -- Sends one physical layer visibility change to Q-SYS.
 local function setLayerVisibility(layerName, isVisible)
   local pageName = config.uci.pageName or "Main"
-  local diagnose = shouldLog("qsys") or shouldLog("manifest")
+  local diagnose = shouldLog("qsys")
   if not diagnose then
     Uci.SetLayerVisibility(
       pageName,
@@ -180,7 +180,7 @@ local function setLayerVisibility(layerName, isVisible)
     .. ", layer=" .. tostring(layerName)
     .. ", visible=" .. tostring(isVisible)
     .. ", error=" .. tostring(err)
-  log(shouldLog("qsys") and "qsys" or "manifest", message)
+  log("qsys", message)
   error(message, 0)
 end
 
@@ -197,11 +197,12 @@ end
 
 -- Finds active owner pages whose own view is suppressed by owned groups.
 local function hiddenOwnerPageIds()
-  local hidden = {}
+  local hidden
   for groupId in pairs(state.activeGroupIds) do
     local group = config.groups[groupId]
     if group and group.ownerVisibility == OWNER_HIDDEN then
       if indexes.ownerKindByGroupId[groupId] == "page" then
+        hidden = hidden or {}
         hidden[group.owner] = true
       end
     end
@@ -214,7 +215,7 @@ local function resolveDesiredLayers()
   local desired = {}
   local hidden  = hiddenOwnerPageIds()
   for pageId in pairs(state.activePageIds) do
-    if not hidden[pageId] then
+    if not hidden or not hidden[pageId] then
       local view = viewForPageId(pageId)
       assert(view, pageId .. " is active but unavailable")
       addLayers(desired, view)
@@ -261,7 +262,7 @@ local function updateHistoryControls()
   end)
 end
 
--- Clears both history stacks when navigation crosses an access/keypad boundary.
+-- Clears both history stacks when navigation crosses an access boundary.
 local function clearHistory()
   local had = #historyBack > 0 or #historyForward > 0
   historyBack    = {}
@@ -294,8 +295,8 @@ end
 
 -- Closes a group, its active pages, and any active groups it owns.
 local function closeGroup(groupId)
-  for pageId, page in pairs(config.pages) do
-    if state.activePageIds[pageId] and page.owner == groupId then
+  for pageId in pairs(indexes.pagesByGroupId[groupId] or {}) do
+    if state.activePageIds[pageId] then
       state.activePageIds[pageId] = nil
     end
   end
@@ -408,12 +409,10 @@ end
 -- Interlocks page open controls to reflect the currently active pages.
 local function updatePageOpenControls()
   if not config then return end
-  for pageId, page in pairs(config.pages) do
-    if page.controls and page.controls.open then
-      forEachControl(page.controls.open, function(c)
-        c.Boolean = state.activePageIds[pageId] == true
-      end)
-    end
+  for pageId, controls in pairs(indexes.openControlsByPageId) do
+    forEachControl(controls, function(c)
+      c.Boolean = state.activePageIds[pageId] == true
+    end)
   end
 end
 
@@ -484,7 +483,7 @@ local function applyNavigationChange(before, record)
   reconcileVisibility()
   restartPinEntryTimer()
   restartSessionTimer()
-  if record and not sameSnapshot(before, copyStateSnapshot()) then
+  if record and not snapshotMatchesCurrent(before) then
     recordHistory(before)
   else
     updateHistoryControls()
@@ -493,7 +492,7 @@ end
 
 -- Shared page-open path used by public navigation and internal transitions.
 local function openPageInternal(pageId, record)
-  local before = copyStateSnapshot()
+  local before = record and copyStateSnapshot()
   if shouldLog("navigation") then log("navigation", "open " .. pageId) end
   activatePage(pageId)
   applyNavigationChange(before, record)
@@ -501,10 +500,10 @@ end
 
 -- Shared page-close path that applies default and empty-group behavior.
 local function closePageInternal(pageId, record)
-  local before = copyStateSnapshot()
   if not state.activePageIds[pageId] then
     updateHistoryControls(); return
   end
+  local before = record and copyStateSnapshot()
   if shouldLog("navigation") then log("navigation", "close " .. pageId) end
   local groupId  = config.pages[pageId].owner
   local group    = config.groups[groupId]
@@ -881,12 +880,16 @@ local function buildIndexes(candidate)
     groupsOwnedByOwnerId = {},
     pagesByGroupId       = {},
     ownerKindByGroupId   = {},
+    openControlsByPageId = {},
   }
 
   for pageId, page in pairs(candidate.pages) do
     local g = page.owner
     indexes.pagesByGroupId[g] = indexes.pagesByGroupId[g] or {}
     indexes.pagesByGroupId[g][pageId] = true
+    if page.controls and page.controls.open then
+      indexes.openControlsByPageId[pageId] = page.controls.open
+    end
   end
 
   for groupId, group in pairs(candidate.groups) do
@@ -953,6 +956,11 @@ local function validateFinal(candidate)
   end
   access.lockedGroupId   = rootGroupOf(lockedGroup)
   access.unlockedGroupId = rootGroupOf(defaultGroup)
+
+  for pageId, page in pairs(candidate.pages) do
+    page.lockedView = groupIsUnder(page.owner, access.lockedGroupId,
+      candidate.groups)
+  end
 
   if access.keypadRequired then
     local kp = candidate.pages[access.keypadPageId]
@@ -1118,7 +1126,7 @@ local function bindControls()
           if state.access ~= ACCESS_LOCKED then
             changeAccess(ACCESS_LOCKED)
           end
-          Navigator.open(config.access.keypadPageId)
+          openPageInternal(config.access.keypadPageId, false)
         else
           changeAccess(config.access.defaultLevelId)
         end
