@@ -58,3 +58,38 @@ MyPageId = page({ owner = "MyGroupId", content = "My Q-SYS Layer Name" })
 ## Start Here
 
 Read [Navigator.md](Navigator.md) for the model and API details, then compare it with [example-uci.lua](example-uci.lua). The example shows the current authored style with locked access, a keypad, persistent frame layers, an interlocked system group, independent tools, and page-owned subpages.
+
+## Q-SYS Without Require
+
+Q-SYS scripts cannot load `Navigator.lua` with `require`. Keep the project at the top of the script, add tiny local `group` and `page` helpers, then paste the Navigator implementation below it.
+
+```lua
+local function group(spec)
+  spec.__kind = "group"
+  return spec
+end
+
+local function page(spec)
+  spec.__kind = "page"
+  return spec
+end
+
+local project = {
+  uci = { pageName = "Main" },
+
+  accessGate = group({ owner = "root", mode = "interlocked", startAt = "splash" }),
+  session = group({ owner = "root", mode = "independent", startAt = { "frame", "system" } }),
+  system = group({ owner = "session", mode = "interlocked", startAt = "home" }),
+
+  splash = page({ owner = "accessGate", content = { locked = "Splash" } }),
+  frame = page({ owner = "session", content = "Frame" }),
+  home = page({ owner = "system", content = "Home" }),
+}
+
+-- Paste Navigator.lua below this point.
+-- In a single-file script, replace Navigator.lua's final `return Navigator`
+-- with:
+Navigator.apply(project)
+```
+
+The two helpers are only authoring markers. They let the project use the normal Navigator shape before the full Navigator implementation appears later in the same Q-SYS script.
