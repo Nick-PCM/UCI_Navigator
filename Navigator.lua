@@ -570,7 +570,7 @@ local function accessStartGroupId(access)
     or config.access.levels[config.access.defaultLevelId].groupId
 end
 
--- Activates the configured entry group for an access level.
+-- Activates the configured start group for an access level.
 local function activateAccessStartGroup(access)
   activateGroup(accessStartGroupId(access))
 end

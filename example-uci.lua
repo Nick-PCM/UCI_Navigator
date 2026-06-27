@@ -44,16 +44,9 @@ Navigator.apply({
     forward = "Forward", -- navigate to next state
   },
 
-
-  -- Root-owned groups separate locked access from the unlocked session.
-  entry = group({
-    owner = "root",
-    mode = "independent"
-  }),
-
   -- accessGate is interlocked so splash and keypad replace each other inside gate.
   accessGate = group({
-    owner = "entry",
+    owner = "root",
     mode = "interlocked",
     startAt = "splash"
   }),

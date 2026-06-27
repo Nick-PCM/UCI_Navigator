@@ -1,110 +1,60 @@
 # UCI Navigator
 
-Navigator is a Lua runtime for Q-SYS UCI navigation. It keeps layer visibility, access level, keypad/session timing, history, and Q-SYS control bindings in one flat project table.
+UCI Navigator is a Lua navigation runtime for Q-SYS UCIs. It gives a UCI script a small authored model for pages, groups, access levels, timers, history, and controls, then keeps Q-SYS layer visibility synchronized with that model.
 
-Use it when a UCI has more than a few pages, when locked and unlocked views need to coexist, or when repeated frame layers such as headers, footers, ribbons, and backgrounds should stay predictable as pages change.
+Navigator uses the word `page` for a navigation state. The Q-SYS assets it actually manages are UCI layers named in each page's `content`.
 
-## Core Terms
+## What It Solves
 
-- `page`: a navigable state that shows one or more Q-SYS UCI layers.
-- `group`: a container that owns direct pages and/or groups.
-- `mode`: `interlocked` means one direct member at a time; `independent` means direct members can coexist.
-- `access`: the current access level, usually `locked`, `user`, and optionally project-specific levels such as `admin`.
-- `startAt`: the direct member or members a group opens by default.
-- `controls`: Q-SYS controls that open pages, change access, lock, pulse activity, or move through history.
+Q-SYS UCIs often start as direct button-to-layer scripts. That becomes hard to maintain when a design needs:
 
-The implicit top-level owner is the string `"root"`.
+- interlocked sections, tabs, or destinations
+- persistent frame layers such as headers, footers, ribbons, and backgrounds
+- tool panels, overlays, dialogs, or modals that can coexist with other pages
+- locked and unlocked views
+- keypad-based access changes
+- session and keypad timeouts
+- back/forward history
+- multiple controls triggering the same navigation action
 
-## Quick Start
+Navigator centralizes those rules in one project table and derives layer visibility from the current navigation state.
 
-```lua
--- Useful for local tooling and documentation. In Q-SYS, require only works if
--- Navigator.lua is available to the Lua environment; otherwise load/paste it first.
-local Navigator = require("Navigator")
+## Project Shape
 
-Navigator.apply({
-  uci = { pageName = "Main" },
+Navigator projects use explicit ownership:
 
-  logging = {
-    manifest = true,
-    qsys = true,
-  },
-
-  access = {
-    locked = { startAt = "accessGate", keypad = "keypad", pinEntryTimeoutSeconds = 30 },
-    user = { startAt = "session", sessionTimeoutSeconds = 600, default = true },
-    admin = { startAt = "session", sessionTimeoutSeconds = 600 },
-  },
-
-  accessControls = {
-    level = "Access Level",
-    change = "Change Access Level",
-    lock = "Lock Request",
-    activityPulse = "Activity Pulse",
-  },
-
-  entry = group({ owner = "root", mode = "independent" }),
-  accessGate = group({ owner = "entry", mode = "interlocked", startAt = "splash" }),
-
-  session = group({
-    owner = "root",
-    mode = "independent",
-    startAt = { "frame", "system" },
-  }),
-
-  system = group({ owner = "session", mode = "interlocked", startAt = "home" }),
-
-  splash = page({ owner = "accessGate", content = { locked = "Splash" } }),
-  keypad = page({ owner = "accessGate", content = { locked = "Keypad" } }),
-
-  frame = page({
-    owner = "session",
-    content = {
-      user = { "Header", "Footer", "Ribbon", "Background" },
-      admin = { "Header", "Footer", "Ribbon", "Admin Ribbon", "Background" },
-    },
-  }),
-
-  home = page({
-    owner = "system",
-    content = "Home",
-    controls = { open = "Open Home Page" },
-  }),
-})
-```
-
-`Navigator.apply(project)` validates the authored table, binds configured Q-SYS controls, sets the external access-level control to `locked`, opens locked access, and reconciles UCI layer visibility.
-
-## Loading From A Core File
-
-If Q-SYS can read project files from the Core filesystem, `qsys-require.lua` shows a minimal Lua 5.3 loader for files that end with `return aModule`:
-
-```lua
-local function loadModule(path)
-  local file = assert(io.open(path, "r"))
-  local source = file:read("*a")
-  file:close()
-
-  return assert(load(source, "@" .. path))()
-end
-
-local Navigator = loadModule("/design/lua/Navigator.lua")
-```
-
-## Authoring Rules
-
-- Groups and pages are top-level entries in the project table.
+- Groups and pages are top-level entries in the authored project table.
 - Every group and page has an explicit `owner`.
-- `access.<level>.startAt` names one group.
-- `group.startAt` names direct members of that group.
-- An `independent` group can use a single `startAt` ID or a list of direct page/group IDs.
-- An `interlocked` group can use only one `startAt` ID.
-- Page-owned groups require `parentVisible = true` or `parentVisible = false`.
-- Page content can be one layer name, a list of layer names, or an access-keyed table.
+- `owner`, `startAt`, and `keypad` use Navigator IDs.
+- `content` strings are Q-SYS UCI layer names.
+- Control strings are Q-SYS control names.
 
-## Files
+```lua
+MyGroupId = group({ owner = "root", mode = "interlocked", startAt = "MyPageId" })
+MyPageId = page({ owner = "MyGroupId", content = "My Q-SYS Layer Name" })
+```
 
-- `Navigator.lua`: the implementation.
-- `Navigator.md`: the full technical model, validation rules, and usage patterns.
-- `example-uci.lua`: a flat keypad example using the current engine surface.
-- `qsys-require.lua`: a minimal loader experiment for Core filesystem Lua files.
+## Key Capabilities
+
+- Interlocked and independent groups.
+- Group-owned and page-owned subnavigation.
+- Access-specific content, with fallback to the default unlocked access level.
+- Locked access with optional keypad.
+- Session and keypad timeout handling.
+- Page open/close controls, access controls, and history controls.
+- Multiple Q-SYS controls can be wired to the same Navigator action.
+- Manifest logging for configured layer/control names.
+- Q-SYS layer-call diagnostics when layer names do not match the UCI.
+
+## Repository Files
+
+- `Navigator.lua`: runtime implementation.
+- `Navigator.md`: reference manual for the model, rules, and API.
+- `example-uci.lua`: example authored UCI project.
+- `UCI Navigation Testing.qsys`: Q-SYS test design.
+- `qsys-require.lua`: small experiment for loading Lua modules from a Core filesystem path.
+- `old/`: archived prior experiments and implementations.
+
+## Start Here
+
+Read [Navigator.md](Navigator.md) for the model and API details, then compare it with [example-uci.lua](example-uci.lua). The example shows the current authored style with locked access, a keypad, persistent frame layers, an interlocked system group, independent tools, and page-owned subpages.
