@@ -1,6 +1,6 @@
 # UCI Navigator
 
-UCI Navigator is a Lua navigation runtime for Q-SYS UCIs. It gives a UCI script a small authored model for pages, groups, access levels, timers, history, and controls, then keeps Q-SYS layer visibility synchronized with that model.
+UCI Navigator is a Lua navigation runtime for Q-SYS UCIs. It gives a UCI script a small authored model for pages, sections, access levels, timers, history, and controls, then keeps Q-SYS layer visibility synchronized with that model.
 
 Navigator uses the word `page` for a navigation state. The Q-SYS assets it actually manages are UCI layers named in each page's `content`.
 
@@ -23,25 +23,26 @@ Navigator centralizes those rules in one project table and derives layer visibil
 
 Navigator projects use explicit ownership:
 
-- Groups and pages are top-level entries in the authored project table.
-- Every group and page has an explicit `owner`.
-- `owner`, `startAt`, and `keypad` use Navigator IDs.
+- Sections and pages are top-level entries in the authored project table.
+- Every section and page has an explicit `owner`.
+- Every section has a `mode`: `switch` keeps one direct member active, while `stack` allows direct members to coexist.
+- `owner`, `open`, and `keypad` use Navigator IDs.
 - `content` strings are Q-SYS UCI layer names.
 - Control strings are Q-SYS control names.
 
 ```lua
-MyGroupId = group({ owner = "root", mode = "switch", startAt = "MyPageId" })
-MyPageId = page({ owner = "MyGroupId", content = "My Q-SYS Layer Name" })
+system = section({ owner = "root", mode = "switch", open = "home" })
+home = page({ owner = "system", content = "Home Layer" })
 ```
 
 ## Key Capabilities
 
-- Switch and stack groups.
-- Group-owned and page-owned subnavigation.
+- Switch and stack sections.
+- Section-owned subnavigation with pages that show Q-SYS layers.
 - Access-specific content, with fallback to the default unlocked access level.
 - Locked access with optional keypad.
 - Session and keypad timeout handling.
-- Page open/close controls, access controls, and history controls.
+- Page/section open/close controls, access controls, and history controls.
 - Multiple Q-SYS controls can be wired to the same Navigator action.
 - Manifest logging for configured layer/control names.
 - Q-SYS layer-call diagnostics when layer names do not match the UCI.
@@ -57,17 +58,17 @@ MyPageId = page({ owner = "MyGroupId", content = "My Q-SYS Layer Name" })
 
 ## Start Here
 
-Read [Navigator.md](Navigator.md) for the model and API details, then compare it with [example-uci.lua](example-uci.lua). The example shows the current authored style with locked access, a keypad, persistent frame layers, a switch system group, stack tools, and page-owned subpages.
+Read [Navigator.md](Navigator.md) for the model and API details, then compare it with [example-uci.lua](example-uci.lua). The example shows the current authored style with locked access, a keypad, persistent frame layers, a switch system section, stack tools, and nested section subpages.
 
 Locked access is optional. A project with no lockscreen can omit `access.locked`; Navigator starts at the default access level instead.
 
 ## Q-SYS Without Require
 
-Q-SYS scripts cannot load `Navigator.lua` with `require`. Keep the project at the top of the script, add tiny local `group` and `page` helpers, then paste the Navigator implementation below it.
+Q-SYS scripts cannot load `Navigator.lua` with `require`. Keep the project at the top of the script, add tiny local `section` and `page` helpers, then paste the Navigator implementation below it.
 
 ```lua
-local function group(spec)
-  spec.__kind = "group"
+local function section(spec)
+  spec.__kind = "section"
   return spec
 end
 
@@ -79,9 +80,9 @@ end
 local project = {
   uci = { pageName = "Main" },
 
-  accessGate = group({ owner = "root", mode = "switch", startAt = "splash" }),
-  session = group({ owner = "root", mode = "stack", startAt = { "frame", "system" } }),
-  system = group({ owner = "session", mode = "switch", startAt = "home" }),
+  accessGate = section({ owner = "root", mode = "switch", open = "splash" }),
+  session = section({ owner = "root", mode = "stack", open = { "frame", "system" } }),
+  system = section({ owner = "session", mode = "switch", open = "home" }),
 
   splash = page({ owner = "accessGate", content = { locked = "Splash" } }),
   frame = page({ owner = "session", content = "Frame" }),
@@ -94,4 +95,4 @@ local project = {
 Navigator.apply(project)
 ```
 
-The two helpers are only authoring markers. They let the project use the normal Navigator shape before the full Navigator implementation appears later in the same Q-SYS script.
+The helpers are only authoring markers. They let the project use the normal Navigator shape before the full Navigator implementation appears later in the same Q-SYS script.

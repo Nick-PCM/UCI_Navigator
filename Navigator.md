@@ -1,8 +1,8 @@
 # Navigator
 
-Navigator controls which Q-SYS UCI layers are visible as a user moves through a touchscreen interface. It gives the project one place to define pages, groups, access levels, keypad behavior, history controls, and button bindings.
+Navigator controls which Q-SYS UCI layers are visible as a user moves through a touchscreen interface. It gives the project one place to define pages, sections, access levels, keypad behavior, history controls, and button bindings.
 
-The core model is ownership. Pages and groups are top-level entries, and each one names its owner explicitly. Groups decide how their directly owned pages and groups behave. Pages contribute visible UCI layers through `content`. Access levels decide which page content is eligible to show, which content variant to use, which group becomes active first, and when the interface should return to locked access.
+The core model is ownership. Pages and sections are top-level entries, and each one names its owner explicitly. Sections decide how their directly owned pages and sections behave. Pages contribute visible UCI layers through `content`. Access levels decide which page content is eligible to show, which content variant to use, which section becomes active first, and when the interface should return to locked access.
 
 Navigator calls these navigation states `pages`, but it does not manage Q-SYS UCI pages directly. The visible assets it writes are Q-SYS UCI layers on the configured UCI page.
 
@@ -14,11 +14,11 @@ Navigator calls these navigation states `pages`, but it does not manage Q-SYS UC
 - [Value Shapes](#value-shapes)
 - [Authoring Surface](#authoring-surface)
 - [Project Table](#project-table)
-- [Groups](#groups)
+- [Sections](#sections)
 - [Pages](#pages)
 - [Access](#access)
 - [Access Controls](#access-controls)
-- [Page And History Controls](#page-and-history-controls)
+- [Navigation And History Controls](#navigation-and-history-controls)
 - [Visibility Resolution](#visibility-resolution)
 - [Logging](#logging)
 - [Validation](#validation)
@@ -28,15 +28,15 @@ Navigator calls these navigation states `pages`, but it does not manage Q-SYS UC
 A passcode protected project commonly uses a locked gate side and an unlocked session side:
 
 ```lua
-accessGate = group({ owner = "root", mode = "switch", startAt = "splash" })
+accessGate = section({ owner = "root", mode = "switch", open = "splash" })
 
-session = group({
+session = section({
   owner = "root",
   mode = "stack",
-  startAt = { "frame", "system" },
+  open = { "frame", "system" },
 })
 
-system = group({ owner = "session", mode = "switch", startAt = "home" })
+system = section({ owner = "session", mode = "switch", open = "home" })
 
 splash = page({ owner = "accessGate", content = { locked = "Splash" } })
 keypad = page({ owner = "accessGate", content = { locked = "Keypad" } })
@@ -45,9 +45,9 @@ home = page({ owner = "system", content = "Home" })
 settings = page({ owner = "system", content = "Settings" })
 ```
 
-`access.locked.startAt = "accessGate"` enters the locked gate. `access.user.startAt = "session"` enters the unlocked session. `session.startAt = { "frame", "system" }` opens persistent frame layers and the primary switch system group together.
+`access.locked.open = "accessGate"` enters the locked gate. `access.user.open = "session"` enters the unlocked session. `session.open = { "frame", "system" }` opens persistent frame layers and the primary switch system section together.
 
-Use stack groups for frames, tools, overlays, modals, dialogs, and coexistence. Use switch groups for tabs, main destinations, or any directly owned pages or groups that should replace one another.
+Use stack sections for frames, tools, overlays, modals, dialogs, and coexistence. Use switch sections for tabs, main destinations, or any directly owned pages or sections that should replace one another.
 
 ## Startup And Runtime
 
@@ -61,75 +61,75 @@ Navigator.apply({
 
 At apply time Navigator:
 
-1. Partitions top-level `group(...)` and `page(...)` entries from configuration tables.
-2. Normalizes group, page, access, content, and control definitions.
-3. Validates ownership, access start groups, page content, controls, `startAt`, and page-owned group rules.
-4. Builds runtime indexes for owned groups, pages by group, and owner kinds.
-5. Sets the external access-level control to `locked` when one is configured.
-6. Sets internal access state to `locked`.
-7. Activates the locked access start group.
+1. Partitions top-level `section(...)` and `page(...)` entries from configuration tables.
+2. Normalizes section, page, access, content, and control definitions.
+3. Validates ownership, access entry sections, page content, controls, and `open`.
+4. Builds runtime indexes for owned sections, pages by section, open controls, and configured layers.
+5. Sets the external access-level control to the startup access level when one is configured.
+6. Sets internal access state to the startup access level.
+7. Activates that access level's entry section.
 8. Computes the desired Q-SYS layer set and applies visibility.
 9. Binds configured Q-SYS controls to Navigator actions.
 
-After apply, navigation is state-based. Opening pages, closing pages, changing access, history traversal, and timers mutate Navigator's active page/group state. Navigator then recomputes the desired Q-SYS layer set and writes only the visibility changes needed to reach that state.
+After apply, navigation is state-based. Opening pages, closing pages, changing access, history traversal, and timers mutate Navigator's active page/section state. Navigator then recomputes the desired Q-SYS layer set and writes only the visibility changes needed to reach that state.
 
-There is no separate preprocessing step. The authoring helpers `group(...)` and `page(...)` mark top-level tables so `Navigator.apply(...)` can identify navigation objects.
+There is no separate preprocessing step. The authoring helpers `section(...)` and `page(...)` mark top-level tables so `Navigator.apply(...)` can identify navigation objects.
 
 ## IDs And Q-SYS Names
 
 Navigator uses strings for two different things, so keep the categories separate:
 
 ```lua
-MyGroupId = group({
-  owner = "root",          -- owner ID: built-in root owner
-  mode = "switch",
-  startAt = "MyPageId",    -- Navigator page ID
+system = section({
+  owner = "root",       -- owner ID: built-in root owner
+  mode  = "switch",
+  open  = "home",   -- Navigator page ID
 })
 
-MyPageId = page({
-  owner = "MyGroupId",     -- Navigator group ID
-  content = "My Q-SYS Layer Name", -- Q-SYS UCI layer name
+home = page({
+  owner   = "system",         -- Navigator section ID
+  content = "Home Layer", -- Q-SYS UCI layer name
   controls = {
-    open = "My Q-SYS Control Name", -- Q-SYS control name
+    open = "Open Home", -- Q-SYS control name
   },
 })
 ```
 
 The left side table key is the Navigator ID:
 
-- `MyGroupId` is a group ID.
-- `MyPageId` is a page ID.
+- `system` is a section ID.
+- `home` is a page ID.
 
 Strings inside relationship fields are Navigator IDs:
 
-- `owner = "MyGroupId"`
-- `startAt = "MyPageId"`
-- `access.user.startAt = "MyGroupId"`
-- `keypad = "MyPageId"`
+- `owner = "system"`
+- `open = "home"`
+- `access.user.open = "system"`
+- `keypad = "keypad"`
 
 Strings inside Q-SYS fields are Q-SYS names:
 
-- `content = "My Q-SYS Layer Name"` is a UCI layer name.
-- `controls.open = "My Q-SYS Control Name"` is a Q-SYS control name.
+- `content = "Home Layer"` is a UCI layer name.
+- `controls.open = "Open Home"` is a Q-SYS control name.
 - `uci.pageName = "Main"` is a Q-SYS UCI page name.
 
 ## Value Shapes
 
 Navigator intentionally accepts a few compact value shapes. This section lists the overloaded fields in one place.
 
-`group.startAt`:
+Section `open`:
 
 ```lua
-startAt = "MyPageId"
-startAt = { "MyFramePageId", "MySystemGroupId" }
+open = "home"
+open = { "frame", "system" }
 ```
 
-For a `switch` group, `startAt` must be one directly owned page or group ID. For a `stack` group, `startAt` may be one directly owned page/group ID or a list of directly owned page/group IDs.
+For a `switch` section, `open` must be one directly owned page or section ID. For a `stack` section, `open` may be one directly owned page/section ID or a list of directly owned page/section IDs.
 
 `page.content`:
 
 ```lua
-content = "My Q-SYS Layer Name"
+content = "Home Layer"
 content = { "Header Q-SYS Layer", "Footer Q-SYS Layer" }
 content = { user = "User Audio Q-SYS Layer", admin = "Admin Audio Q-SYS Layer" }
 content = { user = { "Header Q-SYS Layer", "Footer Q-SYS Layer" }, admin = { "Header Q-SYS Layer", "Admin Ribbon Q-SYS Layer" } }
@@ -140,9 +140,9 @@ A content string is one Q-SYS layer. A content list is multiple Q-SYS layers for
 Control fields:
 
 ```lua
-controls = { open = "My Q-SYS Control Name" }
-controls = { open = { "My Q-SYS Control Name", "My Other Q-SYS Control Name" } }
-controls = { open = Controls["My Q-SYS Control Name"] }
+controls = { open = "Open Home" }
+controls = { open = { "Open Home", "Open Home Alternate" } }
+controls = { open = Controls["Open Home"] }
 ```
 
 Control values may be Q-SYS control names, Q-SYS control objects, or lists of equivalent names/objects. A list such as `open = { "Control A", "Control B" }` wires every listed control to the same Navigator event handler.
@@ -152,31 +152,33 @@ Control values may be Q-SYS control names, Q-SYS control objects, or lists of eq
 Navigator exposes:
 
 ```lua
-group(spec)
+section(spec)
 page(spec)
 
 Navigator.apply(project)
 Navigator.setAccess(accessLevel)
-Navigator.open(pageId)
-Navigator.close(pageId)
+Navigator.open(id)
+Navigator.close(id)
 Navigator.back()
 Navigator.forward()
 Navigator.getState()
 Navigator.getVisibleLayers()
 ```
 
-`group` and `page` are also exposed globally for compact project scripts:
+`section` and `page` are also exposed globally for compact project scripts:
 
 ```lua
-MyGroupId = group({ owner = "root", mode = "switch", startAt = "MyPageId" })
-MyPageId = page({ owner = "MyGroupId", content = "My Q-SYS Layer Name" })
+system = section({ owner = "root", mode = "switch", open = "home" })
+home = page({ owner = "system", content = "Home Layer" })
 ```
 
 IDs are the string keys in the project table. Custom handlers use those same string IDs:
 
 ```lua
-Navigator.open("MyPageId")
-Navigator.close("MyPageId")
+Navigator.open("home")
+Navigator.open("system")
+Navigator.close("home")
+Navigator.close("system")
 Navigator.setAccess("admin")
 ```
 
@@ -193,99 +195,100 @@ A project table may contain:
   historyControls = {},
   historyMaxEntries = 25,
 
-  MyGroupId = group({ ... }),
-  MyPageId = page({ ... }),
+  system = section({ ... }),
+  home = page({ ... }),
 }
 ```
 
-Only top-level entries returned by `group(...)` or `page(...)` become navigation objects. Other keys are configuration tables.
+Only top-level entries returned by `section(...)` or `page(...)` become navigation objects. Other keys are configuration tables.
 
-## Groups
+## Sections
 
-A group is a container with an owner, a mode, optional defaults, and optional page-owner visibility behavior:
+A section is a navigation container with an owner, mode, optional open members, and optional controls:
 
 ```lua
-MyGroupId = group({
+session = section({
   owner = "root",
-  mode = "switch",
-  startAt = "MyPageId",
+  mode  = "stack",
+  open  = { "frame", "system" },
 })
+
+system = section({ owner = "session", mode = "switch", open = "home" })
 ```
 
 Owners are strings:
 
-- `"root"` for a top-level group.
-- another group ID for deeper hierarchy.
-- a page ID for page-owned subpage groups.
+- `"root"` for a top-level section.
+- another section ID for deeper hierarchy.
 
 `mode` is required:
 
-- `switch`: one directly owned page or group can be active at a time.
-- `stack`: multiple directly owned pages and groups can be active at once.
+- `switch`: one directly owned page or section can be active at a time.
+- `stack`: multiple directly owned pages and sections can be active at once.
 
-The implicit `"root"` owner behaves like `switch`, so direct root-owned groups replace one another.
+The implicit `"root"` owner behaves like `switch`, so direct root-owned sections replace one another.
 
-Use `switch` for tab sets, main destinations, route pages, and any set where opening one directly owned page or group should close the others. Use `stack` for persistent frames, tool panels, overlays, modals, dialogs, and any directly owned pages or groups that should coexist.
+Use `switch` for tab sets, main destinations, route pages, and any set where opening one directly owned page or section should close the others. Use `stack` for persistent frames, tool panels, overlays, modals, dialogs, and any directly owned pages or sections that should coexist.
 
-### startAt
+### open
 
-`group.startAt` names the directly owned page or group that opens when the group activates. In a `stack` group, it may name a list of directly owned pages and groups.
+`open` names the directly owned page or section that opens when the section activates. In a `stack` section, it may name a list of directly owned pages and sections.
 
-For a `switch` group:
+For a `switch` section:
 
 ```lua
-MyGroupId = group({ owner = "root", mode = "switch", startAt = "MyPageId" })
+system = section({ owner = "root", mode = "switch", open = "home" })
 ```
 
-A `switch` group may name only one directly owned page or group.
+A `switch` section may name only one directly owned page or section.
 
-For a `stack` group:
+For a `stack` section:
 
 ```lua
-MySessionGroupId = group({
+session = section({
   owner = "root",
-  mode = "stack",
-  startAt = { "MyFramePageId", "MySystemGroupId" },
+  mode  = "stack",
+  open  = { "frame", "help" },
 })
 ```
 
-A `stack` group may name one ID or a list of directly owned page/group IDs. Mixed page and group defaults are allowed as long as every ID is directly owned by that group.
+A `stack` section may name one ID or a list of directly owned page/section IDs. Mixed page and section open members are allowed as long as every ID is directly owned by that section.
 
-If `startAt` is omitted, activating the group activates only the group container. No page or owned group opens automatically. This can be useful for optional tool groups and modals that should stay dormant until a control opens them.
+If `open` is omitted, activating the section activates only the section container. No page or owned section opens automatically. This can be useful for optional tool sections and modals that should stay dormant until a control opens them.
 
-### Page-Owned Groups
+### Sections As Destinations
 
-Page-owned groups model subpages:
+Sections can be destinations. Use this when a main destination needs its own base content plus subnavigation:
 
 ```lua
-MySubpageGroupId = group({
-  owner = "MyParentPageId",
-  mode = "switch",
-  parentVisible = true,
-  startAt = "MySubpageId",
+audio = section({
+  owner    = "system",
+  mode     = "stack",
+  open     = { "audioBase", "audioPages" },
+  controls = { open = "Open Audio Page" },
 })
+
+audioBase = page({ owner = "audio", content = "Audio" })
+
+audioPages = section({ owner = "audio", mode = "switch", open = "audioRouting" })
+audioRouting = page({ owner = "audioPages", content = "Audio Routing" })
 ```
 
-`parentVisible` is required for page-owned groups:
-
-- `true`: keep the owner page visible while the owned group is active.
-- `false`: suppress the owner page while the owned group is active.
-
-`parentVisible` is invalid on root-owned or group-owned groups.
+In this shape, `audio` is the destination in the system section. `audioBase` supplies the base Q-SYS layers, and `audioPages` supplies the nested switching behavior. Pages are leaves; sections own the graph.
 
 ## Pages
 
 A page has an owner, content, and optional controls:
 
 ```lua
-MyPageId = page({
-  owner = "MyGroupId",
+home = page({
+  owner   = "system",
   content = { user = "User Q-SYS Layer", admin = "Admin Q-SYS Layer" },
-  controls = { open = "My Q-SYS Control Name" },
+  controls = { open = "Open Home" },
 })
 ```
 
-`owner` must be a group ID.
+`owner` must be a section ID.
 
 `content` may be:
 
@@ -296,17 +299,17 @@ MyPageId = page({
 Examples:
 
 ```lua
-MyPageId = page({ owner = "MyGroupId", content = "My Q-SYS Layer Name" })
+home = page({ owner = "system", content = "Home Layer" })
 
-MyFramePageId = page({
-  owner = "MySessionGroupId",
+frame = page({
+  owner   = "session",
   content = { "Header Layer", "Footer Layer", "Background Layer" },
 })
 
-MyAudioPageId = page({
-  owner = "MySystemGroupId",
+audioStatus = page({
+  owner   = "system",
   content = {
-    user = "User Audio Layer",
+    user  = "User Audio Layer",
     admin = "Admin Audio Layer",
   },
 })
@@ -323,23 +326,23 @@ The `access` table is keyed by access level:
 ```lua
 access = {
   locked = {
-    startAt = "accessGate",
+    open = "accessGate",
     keypad = "keypad",
     pinEntryTimeoutSeconds = 30,
   },
   user = {
-    startAt = "session",
+    open = "session",
     sessionTimeoutSeconds = 600,
     default = true,
   },
   admin = {
-    startAt = "session",
+    open = "session",
     sessionTimeoutSeconds = 600,
   },
 }
 ```
 
-`locked`, `user`, and `admin` are all authored access levels in the same table. The difference is that `locked` is the reserved key Navigator uses for the locked side of the interface. You author its `startAt`, content, keypad, and timeout behavior like the other levels, but the key itself must be `locked`.
+`locked`, `user`, and `admin` are all authored access levels in the same table. The difference is that `locked` is the reserved key Navigator uses for the locked side of the interface. You author its `open`, content, keypad, and timeout behavior like the other levels, but the key itself must be `locked`.
 
 `locked` is optional. If it exists, Navigator starts at locked access. If it does not exist, Navigator starts at the default access level.
 
@@ -347,31 +350,31 @@ Rules:
 
 - `locked` is optional and reserved; it cannot be renamed.
 - One non-locked level must set `default = true`.
-- `access.<level>.startAt` names one group ID.
-- `locked.keypad`, when present, names a page under the locked root group.
+- `access.<level>.open` names one section ID.
+- `locked.keypad`, when present, names a page under the locked root section.
 - `pinEntryTimeoutSeconds` returns from keypad to locked access and requires `locked.keypad`.
 - `sessionTimeoutSeconds` returns from unlocked access to locked access and requires `locked`.
 - `accessControls.lock` requires `locked`.
 - Access changes clear history.
 
-Access primarily controls content selection. A page can show different Q-SYS layers at `user` and `admin`, and it can be unavailable at an access level by omitting both that level and the default fallback. Access also controls startup location by activating the configured `startAt` group.
+Access primarily controls content selection. A page can show different Q-SYS layers at `user` and `admin`, and it can be unavailable at an access level by omitting both that level and the default fallback. Access also controls opening location by activating the configured `open` section.
 
-At startup, Navigator sets the configured access-level control to the startup access level before startup navigation. This prevents a restarted script from inheriting a stale value from Q-SYS control state.
+At startup, Navigator sets the configured access-level control before opening the entry section. This prevents a restarted script from inheriting the previous Q-SYS control value.
 
 For a project with no lockscreen and no keypad, omit `locked` entirely:
 
 ```lua
 access = {
-  user = { startAt = "session", default = true },
+  user = { open = "session", default = true },
 }
 
-session = group({
+session = section({
   owner = "root",
-  mode = "stack",
-  startAt = { "frame", "system" },
+  mode  = "stack",
+  open  = { "frame", "system" },
 })
 
-system = group({ owner = "session", mode = "switch", startAt = "home" })
+system = section({ owner = "session", mode = "switch", open = "home" })
 
 frame = page({ owner = "session", content = "Frame" })
 home = page({ owner = "system", content = "Home" })
@@ -398,8 +401,8 @@ For a no-keypad project, omit `locked.keypad` and point the access change contro
 
 ```lua
 access = {
-  locked = { startAt = "accessGate" },
-  user = { startAt = "session", default = true },
+  locked = { open = "accessGate" },
+  user = { open = "session", default = true },
 }
 
 accessControls = {
@@ -407,8 +410,8 @@ accessControls = {
   lock = "Lock Request",
 }
 
-accessGate = group({ owner = "root", mode = "switch", startAt = "splash" })
-session = group({ owner = "root", mode = "switch", startAt = "home" })
+accessGate = section({ owner = "root", mode = "switch", open = "splash" })
+session = section({ owner = "root", mode = "switch", open = "home" })
 
 splash = page({ owner = "accessGate", content = { locked = "Splash" } })
 home = page({ owner = "session", content = "Home" })
@@ -424,9 +427,9 @@ Each control may be a control name string, a Q-SYS control object, or a list of 
 
 `accessControls` is optional. Without it, access can still be changed from custom script code with `Navigator.setAccess("user")`.
 
-## Page And History Controls
+## Navigation And History Controls
 
-Page controls live on pages:
+Navigation controls can live on pages or sections:
 
 ```lua
 controls = {
@@ -435,11 +438,11 @@ controls = {
 }
 ```
 
-Supported page controls are `open` and `close`. A list hooks multiple Q-SYS controls to the same page action, so `open = { "Open Audio", "Open Admin Audio" }` makes either control open the same Navigator page.
+Supported navigation controls are `open` and `close`. A list hooks multiple Q-SYS controls to the same action, so `open = { "Open Audio", "Open Admin Audio" }` makes either control open the same Navigator page or section.
 
-Authoring a control inside a Navigator page only declares what that control does. It does not require the actual Q-SYS control to live on that page's layer, inside that page's visual area, or in any particular UCI context. For example, a global header button can be authored as `controls.open` on the `audio` page because pressing that header button opens `audio`.
+Authoring a control inside a Navigator page or section only declares what that control does. It does not require the actual Q-SYS control to live on that page's layer, inside that visual area, or in any particular UCI context. For example, a global header button can be authored as `controls.open` on the `audio` section because pressing that header button opens `audio`.
 
-Page controls are optional. Pages can also be opened or closed by custom handlers that call `Navigator.open(pageId)` and `Navigator.close(pageId)`.
+Navigation controls are optional. Pages and sections can also be opened or closed by custom handlers that call `Navigator.open(id)` and `Navigator.close(id)`.
 
 History controls are global and optional:
 
@@ -450,7 +453,7 @@ historyControls = {
 }
 ```
 
-Page open/close changes push history when the visible page/group state changes. Access changes clear history because active pages may not be valid under the new access level. Mechanical access flow, such as opening the keypad from the access change control, does not add a history entry.
+Navigation open/close changes push history when the visible page/section state changes. Access changes clear history because active pages may not be valid under the new access level. Mechanical access flow, such as opening the keypad from the access change control, does not add a history entry.
 
 `historyMaxEntries` defaults to `25`. Set it to `false` to disable trimming.
 
@@ -458,10 +461,9 @@ Page open/close changes push history when the visible page/group state changes. 
 
 On each navigation change, Navigator computes the desired layer set from state:
 
-1. Start with the active page and group sets.
-2. Hide an owner page if an active page-owned group has `parentVisible = false`.
-3. Resolve each active page's content for the effective access level.
-4. Apply visibility changes to Q-SYS layers.
+1. Start with the active page and section sets.
+2. Resolve each active page's content for the effective access level.
+3. Apply visibility changes to Q-SYS layers.
 
 Visibility is derived from current state. It is not an accumulation of previous button presses.
 
@@ -491,19 +493,18 @@ logging = {
 
 Navigator validates before startup:
 
-- group and page IDs are non-empty strings
-- group and page IDs do not collide
-- group modes are `switch` or `stack`
-- every group and page has a valid owner
-- group ownership has no cycles
-- access start groups exist
-- locked access, when authored, has at least one default locked page through its start group
-- keypad page, when authored, exists, is under the locked root group, and has locked content
+- section and page IDs are non-empty strings
+- section and page IDs do not collide
+- section modes are `switch` or `stack`
+- every section and page has a valid owner
+- section ownership has no cycles
+- access entry sections exist
+- locked access, when authored, opens at least one locked page through its entry section
+- keypad page, when authored, exists, is under the locked root section, and has locked content
 - lock controls and session timeouts require locked access
-- page-owned groups set `parentVisible`
-- non-page-owned groups do not set `parentVisible`
-- switch groups have at most one `startAt` page or group
-- every `group.startAt` page or group is directly owned by that group
+- pages are leaves; sections may only be owned by `root` or another section
+- switch sections have at most one `open` page or section
+- every section `open` page or section is directly owned by that section
 - page content references declared access levels
 - controls use supported keys
 - named controls exist in `Controls`
