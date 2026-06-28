@@ -4,16 +4,16 @@
 local Navigator = {} -- public module table returned to the project script
 
 local ACCESS_LOCKED  = "locked" -- locked/splash/keypad access
-local SECTION_SWITCH = "switch" -- one direct member active at a time
-local SECTION_STACK  = "stack" -- multiple direct members may be active
+local GROUP_SWITCH = "switch" -- one direct member active at a time
+local GROUP_STACK  = "stack" -- multiple direct members may be active
 local ROOT_OWNER     = "root" -- implicit top-level switch owner
 
 -- Authoring helpers ----------------------------------------------------------
 
--- Authoring constructor for a navigation section.
-function Navigator.section(spec)
-  assert(type(spec) == "table", "section requires a table")
-  spec.__kind = "section"
+-- Authoring constructor for a navigation group.
+function Navigator.group(spec)
+  assert(type(spec) == "table", "group requires a table")
+  spec.__kind = "group"
   return spec
 end
 
@@ -24,28 +24,25 @@ function Navigator.page(spec)
   return spec
 end
 
--- Exposes bare authoring helpers into the global scope for compact scripts.
-if _G then
-  rawset(_G, "section", rawget(_G, "section") or Navigator.section)
-  rawset(_G, "page",    rawget(_G, "page")    or Navigator.page)
-end
-
 -- Runtime state --------------------------------------------------------------
 
 local config -- validated project configuration
 
--- Mutable runtime navigation state: current access plus active pages and sections.
+-- Mutable runtime navigation state: current access plus active pages and groups.
 local state = {
   access = ACCESS_LOCKED,
   activePageIds = {},
-  activeSectionIds = {},
+  activeGroupIds = {},
 }
 
 local indexes              = {} -- derived lookup tables built from config
 local visibleLayers        = {} -- last applied physical layer set
 local visibilityInitialized = false -- whether first visibility pass has run
+local uciPageName = "Main"
+local uciTransition = "none"
 local historyBack          = {} -- back navigation snapshot stack
 local historyForward       = {} -- forward navigation snapshot stack
+local historyMaxEntries = 25
 local accessLevelControl -- Q-SYS control mirroring active access
 local pinEntryTimerObject -- private Q-SYS timer used while keypad is open
 local sessionTimerObject -- private Q-SYS timer used while unlocked
@@ -62,11 +59,11 @@ local function copyTable(source)
   return result
 end
 
--- Captures the active page/section state used for history and change detection.
+-- Captures the active page/group state used for history and change detection.
 local function copyStateSnapshot()
   return {
     activePageIds = copyTable(state.activePageIds),
-    activeSectionIds = copyTable(state.activeSectionIds),
+    activeGroupIds = copyTable(state.activeGroupIds),
   }
 end
 
@@ -77,10 +74,10 @@ local function sameSet(a, b)
   return true
 end
 
--- Compares a saved snapshot to the current active page/section state.
+-- Compares a saved snapshot to the current active page/group state.
 local function snapshotMatchesCurrent(snapshot)
   return sameSet(snapshot.activePageIds, state.activePageIds)
-     and sameSet(snapshot.activeSectionIds, state.activeSectionIds)
+     and sameSet(snapshot.activeGroupIds, state.activeGroupIds)
 end
 
 -- Distinguishes a multi-control alias list from a single Q-SYS control object.
@@ -130,14 +127,14 @@ end
 
 -- Index helpers --------------------------------------------------------------
 
--- Tests whether a section lives under another section in the ownership tree.
-local function sectionIsUnder(sectionId, ancestorSectionId, sections)
-  local current = sectionId
+-- Tests whether a group lives under another group in the ownership tree.
+local function groupIsUnder(groupId, ancestorGroupId, groups)
+  local current = groupId
   while current do
-    if current == ancestorSectionId then return true end
-    local section = sections[current]
-    if not section or section.owner == ROOT_OWNER then return false end
-    current = section.owner
+    if current == ancestorGroupId then return true end
+    local group = groups[current]
+    if not group or group.owner == ROOT_OWNER then return false end
+    current = group.owner
   end
   return false
 end
@@ -169,26 +166,25 @@ end
 
 -- Sends one physical layer visibility change to Q-SYS.
 local function setLayerVisibility(layerName, isVisible)
-  local pageName = config.uci.pageName or "Main"
   local diagnose = shouldLog("qsys")
   if not diagnose then
     Uci.SetLayerVisibility(
-      pageName,
+      uciPageName,
       layerName,
       isVisible,
-      config.uci.transition or "none"
+      uciTransition
     )
     return
   end
   local ok, err = pcall(Uci.SetLayerVisibility,
-    pageName,
+    uciPageName,
     layerName,
     isVisible,
-    config.uci.transition or "none"
+    uciTransition
   )
   if ok then return end
   local message = "UCI layer visibility failed: page="
-    .. tostring(pageName)
+    .. tostring(uciPageName)
     .. ", layer=" .. tostring(layerName)
     .. ", visible=" .. tostring(isVisible)
     .. ", error=" .. tostring(err)
@@ -227,10 +223,9 @@ end
 -- Pushes a history snapshot while respecting the configured history cap.
 local function cappedPush(stack, snapshot)
   stack[#stack + 1] = snapshot
-  local max = config.historyMaxEntries
-  if max == nil then max = 25 end
-  if max == false then return end
-  if #stack > max then table.remove(stack, 1) end
+  if historyMaxEntries ~= false and #stack > historyMaxEntries then
+    table.remove(stack, 1)
+  end
 end
 
 -- Keeps optional history controls disabled when their stack is empty.
@@ -261,113 +256,137 @@ end
 -- Navigation engine ----------------------------------------------------------
 
 local activatePage
-local activateSection
-local activateOpenMembersForSection
+local activateGroup
+local activateOpenMembersForGroup
 
--- Determines how an owner's direct sections/pages switch or stack.
+-- Determines how an owner's direct groups/pages switch or stack.
 local function ownerBehavior(ownerId)
-  if ownerId == ROOT_OWNER then return SECTION_SWITCH end
-  return config.sections[ownerId].behavior
+  if ownerId == ROOT_OWNER then return GROUP_SWITCH end
+  return config.groups[ownerId].behavior
 end
 
--- Closes a section, its active pages, and any active sections it owns.
-local function closeSection(sectionId)
-  for pageId in pairs(indexes.pagesBySectionId[sectionId]) do
+-- Closes a group, its active pages, and any active groups it owns.
+local function closeGroup(groupId)
+  for pageId in pairs(indexes.pagesByGroupId[groupId]) do
     if state.activePageIds[pageId] then
       state.activePageIds[pageId] = nil
     end
   end
-  for ownedSectionId in pairs(indexes.sectionsOwnedByOwnerId[sectionId]) do
-    if state.activeSectionIds[ownedSectionId] then closeSection(ownedSectionId) end
+  for ownedGroupId in pairs(indexes.groupsOwnedByOwnerId[groupId]) do
+    if state.activeGroupIds[ownedGroupId] then closeGroup(ownedGroupId) end
   end
-  state.activeSectionIds[sectionId] = nil
+  state.activeGroupIds[groupId] = nil
 end
 
--- Removes one page and its owned sections without applying open policy.
-local function closePageOnly(pageId)
+-- Removes one active page without applying owner open policy.
+local function closeActivePage(pageId)
   if not state.activePageIds[pageId] then return end
   state.activePageIds[pageId] = nil
 end
 
--- Checks whether a section still has directly active pages or owned sections.
-local function sectionHasActiveDirectMembers(sectionId)
-  for pageId in pairs(indexes.pagesBySectionId[sectionId]) do
+-- Checks whether a group still has directly active pages or owned groups.
+local function groupHasActiveDirectMembers(groupId)
+  for pageId in pairs(indexes.pagesByGroupId[groupId]) do
     if state.activePageIds[pageId] then return true end
   end
-  for ownedSectionId in pairs(indexes.sectionsOwnedByOwnerId[sectionId]) do
-    if state.activeSectionIds[ownedSectionId] then return true end
+  for ownedGroupId in pairs(indexes.groupsOwnedByOwnerId[groupId]) do
+    if state.activeGroupIds[ownedGroupId] then return true end
   end
   return false
 end
 
 -- Enforces switch behavior by closing active siblings under the same owner.
 local function closeOtherDirectMembers(ownerId, keepKind, keepId)
-  if ownerBehavior(ownerId) ~= SECTION_SWITCH then return end
-  for sectionId in pairs(indexes.sectionsOwnedByOwnerId[ownerId]) do
-    if not (keepKind == "section" and keepId == sectionId)
-        and state.activeSectionIds[sectionId] then
-      closeSection(sectionId)
+  if ownerBehavior(ownerId) ~= GROUP_SWITCH then return end
+  for groupId in pairs(indexes.groupsOwnedByOwnerId[ownerId]) do
+    if not (keepKind == "group" and keepId == groupId)
+        and state.activeGroupIds[groupId] then
+      closeGroup(groupId)
     end
   end
-  if config.sections[ownerId] then
-    for pageId in pairs(indexes.pagesBySectionId[ownerId]) do
+  if config.groups[ownerId] then
+    for pageId in pairs(indexes.pagesByGroupId[ownerId]) do
       if not (keepKind == "page" and keepId == pageId)
           and state.activePageIds[pageId] then
-        closePageOnly(pageId)
+        closeActivePage(pageId)
       end
     end
   end
 end
 
--- Activates a section, its owning chain, and its configured open members.
-activateSection = function(sectionId)
-  if state.activeSectionIds[sectionId] then return end
-  local section = config.sections[sectionId]
-  local owner = section.owner
+-- Activates a group, its owning chain, and its configured open members.
+activateGroup = function(groupId)
+  if state.activeGroupIds[groupId] then return end
+  local group = config.groups[groupId]
+  local owner = group.owner
   if owner ~= ROOT_OWNER then
-    activateSection(owner)
+    activateGroup(owner)
   end
-  closeOtherDirectMembers(owner, "section", sectionId)
-  state.activeSectionIds[sectionId] = true
-  activateOpenMembersForSection(sectionId)
+  closeOtherDirectMembers(owner, "group", groupId)
+  state.activeGroupIds[groupId] = true
+  activateOpenMembersForGroup(groupId)
 end
 
--- Opens a page after activating its owner section chain.
+-- Opens a page after activating its owner group chain.
 activatePage = function(pageId)
   local page = config.pages[pageId]
   assert(page, "unknown pageId: " .. tostring(pageId))
   assert(viewForPageId(pageId), pageId .. " unavailable at " .. state.access)
-  local sectionId = page.owner
-  activateSection(sectionId)
-  closeOtherDirectMembers(sectionId, "page", pageId)
+  local groupId = page.owner
+  activateGroup(groupId)
+  closeOtherDirectMembers(groupId, "page", pageId)
   state.activePageIds[pageId] = true
 end
 
--- Opens the configured open member or members for a section.
-activateOpenMembersForSection = function(sectionId)
-  local openIds = config.sections[sectionId].openIds
+-- Opens the configured open member or members for a group.
+activateOpenMembersForGroup = function(groupId)
+  local openIds = config.groups[groupId].openIds
   if #openIds == 0 then return end
   for _, memberId in ipairs(openIds) do
     if config.pages[memberId] then
       activatePage(memberId)
     else
-      activateSection(memberId)
+      activateGroup(memberId)
     end
   end
 end
 
--- Restores a previously captured page/section state for history navigation.
+-- Restores a previously captured page/group state for history navigation.
 local function restoreSnapshot(snapshot)
   state.activePageIds = copyTable(snapshot.activePageIds)
-  state.activeSectionIds = copyTable(snapshot.activeSectionIds)
+  state.activeGroupIds = copyTable(snapshot.activeGroupIds)
 end
 
--- Updates open controls to reflect currently active pages and sections.
-local function updatePageOpenControls()
-  for id, controls in pairs(indexes.openControlsById) do
-    setControlBoolean(controls,
-      state.activePageIds[id] == true or state.activeSectionIds[id] == true)
+local function isActiveIn(pageIds, groupIds, id)
+  return pageIds[id] == true or groupIds[id] == true
+end
+
+local function updateOpenControls(before)
+  if not before then
+    for id, controls in pairs(indexes.openControlsById) do
+      setControlBoolean(controls,
+        isActiveIn(state.activePageIds, state.activeGroupIds, id))
+    end
+    return
   end
+
+  local seen = {}
+  local function updateChanged(ids)
+    for id in pairs(ids) do
+      if not seen[id] then
+        seen[id] = true
+        local active = isActiveIn(state.activePageIds, state.activeGroupIds, id)
+        if active ~= isActiveIn(before.activePageIds, before.activeGroupIds, id) then
+          setControlBoolean(indexes.openControlsById[id], active)
+        end
+      end
+    end
+  end
+
+  updateChanged(before.activePageIds)
+  updateChanged(before.activeGroupIds)
+  updateChanged(state.activePageIds)
+  updateChanged(state.activeGroupIds)
 end
 
 -- Timers ---------------------------------------------------------------------
@@ -434,7 +453,7 @@ end
 
 -- Finishes navigation by reconciling controls, layers, timers, and history.
 local function applyNavigationChange(before, record)
-  updatePageOpenControls()
+  updateOpenControls(before)
   reconcileVisibility()
   restartPinEntryTimer()
   restartSessionTimer()
@@ -445,44 +464,51 @@ local function applyNavigationChange(before, record)
   end
 end
 
--- Shared open path for page and section navigation IDs.
+-- Finishes a history restore after the snapshot has replaced active state.
+local function applyRestoredSnapshot(snapshot, before)
+  restoreSnapshot(snapshot)
+  updateOpenControls(before)
+  reconcileVisibility()
+  restartPinEntryTimer()
+  restartSessionTimer()
+  updateHistoryControls()
+end
+
+-- Shared open path for page and group navigation IDs.
 local function openIdInternal(id, record)
-  local before = record and copyStateSnapshot()
+  local before = copyStateSnapshot()
   if shouldLog("navigation") then log("navigation", "open " .. id) end
   if config.pages[id] then
     activatePage(id)
-  elseif config.sections[id] then
-    activateSection(id)
+  elseif config.groups[id] then
+    activateGroup(id)
   else
-    error("unknown page or section ID: " .. tostring(id), 3)
+    error("unknown page or group ID: " .. tostring(id), 3)
   end
   applyNavigationChange(before, record)
 end
 
--- Shared page-close path that applies open-member and empty-section behavior.
-local function closePageInternal(pageId, record)
+-- Shared page-close path that applies open-member and empty-group behavior.
+local function closePageInternal(pageId)
   if not state.activePageIds[pageId] then
     updateHistoryControls(); return
   end
-  local before = record and copyStateSnapshot()
+  local before = copyStateSnapshot()
   if shouldLog("navigation") then log("navigation", "close " .. pageId) end
-  local sectionId  = config.pages[pageId].owner
-  local section    = config.sections[sectionId]
-  local openIds = section.openIds
-  local isOpenMember = false
-  for _, id in ipairs(openIds) do
-    if id == pageId then isOpenMember = true; break end
-  end
-  if section.behavior == SECTION_SWITCH and isOpenMember then
+  local groupId  = config.pages[pageId].owner
+  local group    = config.groups[groupId]
+  local openIds = group.openIds
+  local isOpenMember = indexes.openMembersByGroupId[groupId][pageId] == true
+  if group.behavior == GROUP_SWITCH and isOpenMember then
     updateHistoryControls(); return
   end
-  closePageOnly(pageId)
-  if section.behavior == SECTION_SWITCH and #openIds > 0 then
-    activateOpenMembersForSection(sectionId)
-  elseif not sectionHasActiveDirectMembers(sectionId) then
-    state.activeSectionIds[sectionId] = nil
+  closeActivePage(pageId)
+  if group.behavior == GROUP_SWITCH and #openIds > 0 then
+    activateOpenMembersForGroup(groupId)
+  elseif not groupHasActiveDirectMembers(groupId) then
+    state.activeGroupIds[groupId] = nil
   end
-  applyNavigationChange(before, record)
+  applyNavigationChange(before, true)
 end
 
 -- Prunes active pages unavailable at a new access level without reconciling yet.
@@ -495,13 +521,13 @@ local function closeUnavailablePages(targetAccess)
     if state.activePageIds[pageId] then
       local access = config.pages[pageId].lockedView and ACCESS_LOCKED or targetAccess
       if not viewForPageId(pageId, access) then
-        local sectionId = config.pages[pageId].owner
-        local section = config.sections[sectionId]
-        closePageOnly(pageId)
-        if section.behavior == SECTION_SWITCH and #section.openIds > 0 then
-          activateOpenMembersForSection(sectionId)
-        elseif not sectionHasActiveDirectMembers(sectionId) then
-          state.activeSectionIds[sectionId] = nil
+        local groupId = config.pages[pageId].owner
+        local group = config.groups[groupId]
+        closeActivePage(pageId)
+        if group.behavior == GROUP_SWITCH and #group.openIds > 0 then
+          activateOpenMembersForGroup(groupId)
+        elseif not groupHasActiveDirectMembers(groupId) then
+          state.activeGroupIds[groupId] = nil
         end
       end
     end
@@ -514,7 +540,7 @@ local function changeAccess(targetAccess)
   Navigator.setAccess(targetAccess)
 end
 
--- Normalizes section open into an ordered direct-member ID list.
+-- Normalizes group open into an ordered direct-member ID list.
 local function normalizeOpenList(ownerId, value)
   if type(value) == "string" then return { value } end
   assert(type(value) == "table" and value[1] ~= nil,
@@ -528,9 +554,9 @@ local function normalizeOpenList(ownerId, value)
   return result
 end
 
--- Activates the entry section configured by an access level's open field.
-local function activateAccessEntrySection(access)
-  activateSection(config.access.levels[access].entrySectionId)
+-- Activates the entry group configured by an access level's open field.
+local function activateAccessEntryGroup(access)
+  activateGroup(config.access.levels[access].entryGroupId)
 end
 
 -- Public API -----------------------------------------------------------------
@@ -540,6 +566,7 @@ function Navigator.setAccess(targetAccess)
   assert(config, "apply Navigator before changing access")
   assert(type(targetAccess) == "string" and config.access.levels[targetAccess],
     "invalid access level: " .. tostring(targetAccess))
+  local before = copyStateSnapshot()
   clearHistory()
   if shouldLog("access") then
     log("access", state.access .. " -> " .. targetAccess)
@@ -550,62 +577,58 @@ function Navigator.setAccess(targetAccess)
   if resetToStart then
     state.access = targetAccess
     state.activePageIds = {}
-    state.activeSectionIds = {}
-    activateAccessEntrySection(targetAccess)
+    state.activeGroupIds = {}
+    activateAccessEntryGroup(targetAccess)
   else
     state.access = targetAccess
     closeUnavailablePages(targetAccess)
-    if not state.activeSectionIds[config.access.levels[targetAccess].rootSectionId] then
-      activateAccessEntrySection(targetAccess)
+    if not state.activeGroupIds[config.access.levels[targetAccess].rootGroupId] then
+      activateAccessEntryGroup(targetAccess)
     end
   end
-  updatePageOpenControls()
+  updateOpenControls(before)
   reconcileVisibility()
   restartSessionTimer()
   updateHistoryControls()
 end
 
--- Public API for opening a page or section by ID and recording history.
+-- Public API for opening a page or group by ID and recording history.
 function Navigator.open(id)
   assert(config, "apply Navigator before navigating")
   openIdInternal(id, true)
 end
 
--- Public API for closing a page or section by ID and recording history.
+-- Public API for closing a page or group by ID and recording history.
 function Navigator.close(id)
   assert(config, "apply Navigator before navigating")
   if config.pages[id] then
-    closePageInternal(id, true)
-  elseif config.sections[id] then
-    if not state.activeSectionIds[id] then updateHistoryControls(); return end
-    local section = config.sections[id]
-    local owner = section.owner
-    local ownerSection = config.sections[owner]
-    local isOpenMember = false
-    if ownerSection then
-      for _, openId in ipairs(ownerSection.openIds) do
-        if openId == id then isOpenMember = true; break end
-      end
-    end
-    if ownerSection and ownerSection.behavior == SECTION_SWITCH and isOpenMember then
+    closePageInternal(id)
+  elseif config.groups[id] then
+    if not state.activeGroupIds[id] then updateHistoryControls(); return end
+    local group = config.groups[id]
+    local owner = group.owner
+    local ownerGroup = config.groups[owner]
+    local isOpenMember = ownerGroup
+      and indexes.openMembersByGroupId[owner][id] == true
+    if ownerGroup and ownerGroup.behavior == GROUP_SWITCH and isOpenMember then
       updateHistoryControls(); return
     end
     local before = copyStateSnapshot()
     if shouldLog("navigation") then log("navigation", "close " .. id) end
-    closeSection(id)
-    if ownerSection and ownerSection.behavior == SECTION_SWITCH
-        and #ownerSection.openIds > 0 then
-      activateOpenMembersForSection(owner)
-    elseif ownerSection and not sectionHasActiveDirectMembers(owner) then
-      state.activeSectionIds[owner] = nil
+    closeGroup(id)
+    if ownerGroup and ownerGroup.behavior == GROUP_SWITCH
+        and #ownerGroup.openIds > 0 then
+      activateOpenMembersForGroup(owner)
+    elseif ownerGroup and not groupHasActiveDirectMembers(owner) then
+      state.activeGroupIds[owner] = nil
     end
     applyNavigationChange(before, true)
   else
-    error("unknown page or section ID: " .. tostring(id), 2)
+    error("unknown page or group ID: " .. tostring(id), 2)
   end
 end
 
--- Restores the previous page/section snapshot from navigation history.
+-- Restores the previous page/group snapshot from navigation history.
 function Navigator.back()
   assert(config, "apply Navigator before navigating")
   if #historyBack == 0 then updateHistoryControls(); return end
@@ -613,13 +636,10 @@ function Navigator.back()
   local previous = historyBack[#historyBack]
   historyBack[#historyBack] = nil
   cappedPush(historyForward, current)
-  restoreSnapshot(previous)
-  updatePageOpenControls()
-  reconcileVisibility()
-  updateHistoryControls()
+  applyRestoredSnapshot(previous, current)
 end
 
--- Restores the next page/section snapshot after a back operation.
+-- Restores the next page/group snapshot after a back operation.
 function Navigator.forward()
   assert(config, "apply Navigator before navigating")
   if #historyForward == 0 then updateHistoryControls(); return end
@@ -627,10 +647,7 @@ function Navigator.forward()
   local nextSnapshot = historyForward[#historyForward]
   historyForward[#historyForward] = nil
   cappedPush(historyBack, current)
-  restoreSnapshot(nextSnapshot)
-  updatePageOpenControls()
-  reconcileVisibility()
-  updateHistoryControls()
+  applyRestoredSnapshot(nextSnapshot, current)
 end
 
 -- Handles keypad inactivity by returning from keypad to locked access.
@@ -650,7 +667,7 @@ function Navigator.getState()
   return {
     access = state.access,
     activePageIds = copyTable(state.activePageIds),
-    activeSectionIds = copyTable(state.activeSectionIds),
+    activeGroupIds = copyTable(state.activeGroupIds),
     canGoBack = #historyBack > 0,
     canGoForward = #historyForward > 0,
   }
@@ -761,8 +778,8 @@ local function normalizeAccess(authored)
     local level = {}
     if definition.open then
       assert(type(definition.open) == "string" and definition.open ~= "",
-        "access." .. accessId .. ".open must be a section ID")
-      level.entrySectionId = definition.open
+        "access." .. accessId .. ".open must be a group ID")
+      level.entryGroupId = definition.open
     end
     normalized.levels[accessId] = level
     if definition.default == true then
@@ -800,16 +817,16 @@ local function normalizeAccess(authored)
   return normalized
 end
 
--- Separates a flat project table into authored sections and pages.
+-- Separates a flat project table into authored groups and pages.
 local function partitionProject(project)
-  local sections = {}
+  local groups = {}
   local pages  = {}
   for key, value in pairs(project) do
     if type(value) == "table" then
-      if value.__kind == "section" then
+      if value.__kind == "group" then
         assert(type(key) == "string" and key ~= "",
-          "section IDs must be non-empty strings")
-        sections[key] = value
+          "group IDs must be non-empty strings")
+        groups[key] = value
       elseif value.__kind == "page" then
         assert(type(key) == "string" and key ~= "",
           "page IDs must be non-empty strings")
@@ -817,45 +834,45 @@ local function partitionProject(project)
       end
     end
   end
-  return sections, pages
+  return groups, pages
 end
 
--- Normalizes authored sections while preserving owner and open IDs.
-local function normalizeSections(rawSections)
+-- Normalizes authored groups while preserving owner and open IDs.
+local function normalizeGroups(rawGroups)
   local normalized = {}
-  for sectionId, spec in pairs(rawSections) do
-    assert(type(spec) == "table", sectionId .. " section spec must be a table")
+  for groupId, spec in pairs(rawGroups) do
+    assert(type(spec) == "table", groupId .. " group spec must be a table")
     local mode = spec.mode
-    assert(mode == SECTION_SWITCH or mode == SECTION_STACK,
-      sectionId .. ' mode must be "switch" or "stack"')
+    assert(mode == GROUP_SWITCH or mode == GROUP_STACK,
+      groupId .. ' mode must be "switch" or "stack"')
     local owner = spec.owner
     assert(type(owner) == "string" and owner ~= "",
-      sectionId .. " requires owner")
-    local section = {
+      groupId .. " requires owner")
+    local group = {
       owner = owner,
       behavior = mode,
       openIds = {},
-      controls = normalizeControls(sectionId .. ".controls",
+      controls = normalizeControls(groupId .. ".controls",
         spec.controls, navigationControlKeys),
     }
     if spec.open then
-      section.openIds = normalizeOpenList(sectionId .. ".open", spec.open)
+      group.openIds = normalizeOpenList(groupId .. ".open", spec.open)
     end
-    normalized[sectionId] = section
+    normalized[groupId] = group
   end
   return normalized
 end
 
 -- Normalizes authored pages into owner, content view, and control tables.
-local function normalizePages(rawPages, normalizedSections, defaultAccess)
+local function normalizePages(rawPages, normalizedGroups, defaultAccess)
   local normalized = {}
   for pageId, spec in pairs(rawPages) do
     assert(type(spec) == "table", pageId .. " page spec must be a table")
     local owner = spec.owner
     assert(type(owner) == "string" and owner ~= "",
       pageId .. " requires owner")
-    assert(normalizedSections[owner],
-      pageId .. " owner " .. owner .. " is not a known section")
+    assert(normalizedGroups[owner],
+      pageId .. " owner " .. owner .. " is not a known group")
     local views = normalizeContent(pageId, spec.content, defaultAccess)
     normalized[pageId] = {
       owner    = owner,
@@ -870,16 +887,17 @@ end
 -- Builds lookup tables used by navigation and validation.
 local function buildIndexes(candidate)
   indexes = {
-    sectionsOwnedByOwnerId = {},
-    pagesBySectionId       = {},
-    openControlsById       = {},
-    configuredLayers       = {},
+    groupsOwnedByOwnerId = {},
+    pagesByGroupId       = {},
+    openControlsById     = {},
+    openMembersByGroupId = {},
+    configuredLayers     = {},
   }
 
   for pageId, page in pairs(candidate.pages) do
     local owner = page.owner
-    indexes.pagesBySectionId[owner] = indexes.pagesBySectionId[owner] or {}
-    indexes.pagesBySectionId[owner][pageId] = true
+    indexes.pagesByGroupId[owner] = indexes.pagesByGroupId[owner] or {}
+    indexes.pagesByGroupId[owner][pageId] = true
     if page.controls and page.controls.open then
       indexes.openControlsById[pageId] = page.controls.open
     end
@@ -888,64 +906,68 @@ local function buildIndexes(candidate)
     end
   end
 
-  for sectionId, section in pairs(candidate.sections) do
-    assert(not candidate.pages[sectionId],
-      sectionId .. " is used as both a section ID and a page ID")
-    local owner = section.owner
-    indexes.pagesBySectionId[sectionId] = indexes.pagesBySectionId[sectionId] or {}
-    indexes.sectionsOwnedByOwnerId[sectionId] =
-      indexes.sectionsOwnedByOwnerId[sectionId] or {}
-    indexes.sectionsOwnedByOwnerId[owner] =
-      indexes.sectionsOwnedByOwnerId[owner] or {}
-    indexes.sectionsOwnedByOwnerId[owner][sectionId] = true
-    if section.controls and section.controls.open then
-      indexes.openControlsById[sectionId] = section.controls.open
+  for groupId, group in pairs(candidate.groups) do
+    assert(not candidate.pages[groupId],
+      groupId .. " is used as both a group ID and a page ID")
+    local owner = group.owner
+    indexes.pagesByGroupId[groupId] = indexes.pagesByGroupId[groupId] or {}
+    indexes.groupsOwnedByOwnerId[groupId] =
+      indexes.groupsOwnedByOwnerId[groupId] or {}
+    indexes.openMembersByGroupId[groupId] = {}
+    indexes.groupsOwnedByOwnerId[owner] =
+      indexes.groupsOwnedByOwnerId[owner] or {}
+    indexes.groupsOwnedByOwnerId[owner][groupId] = true
+    if group.controls and group.controls.open then
+      indexes.openControlsById[groupId] = group.controls.open
     end
-    assert(owner == ROOT_OWNER or candidate.sections[owner],
-      sectionId .. " owner " .. owner .. " is not a known section")
+    assert(owner == ROOT_OWNER or candidate.groups[owner],
+      groupId .. " owner " .. owner .. " is not a known group")
+    for _, memberId in ipairs(group.openIds) do
+      indexes.openMembersByGroupId[groupId][memberId] = true
+    end
   end
 
-  -- Confirms section ownership does not loop back into itself.
+  -- Confirms group ownership does not loop back into itself.
   local visiting, visited = {}, {}
-  local function validateSectionAcyclic(sectionId)
-    if visited[sectionId] then return end
-    assert(not visiting[sectionId], sectionId .. " has an ownership cycle")
-    visiting[sectionId] = true
-    local owner = candidate.sections[sectionId].owner
+  local function validateGroupAcyclic(groupId)
+    if visited[groupId] then return end
+    assert(not visiting[groupId], groupId .. " has an ownership cycle")
+    visiting[groupId] = true
+    local owner = candidate.groups[groupId].owner
     if owner ~= ROOT_OWNER then
-      validateSectionAcyclic(owner)
+      validateGroupAcyclic(owner)
     end
-    visiting[sectionId] = nil
-    visited[sectionId]  = true
+    visiting[groupId] = nil
+    visited[groupId]  = true
   end
-  for sectionId in pairs(candidate.sections) do validateSectionAcyclic(sectionId) end
+  for groupId in pairs(candidate.groups) do validateGroupAcyclic(groupId) end
 end
 
 -- Validates cross-references that require the full normalized project.
 local function validateFinal(candidate)
   local access = candidate.access
-  -- Walk up to find the true root section for each.
-  local function rootSectionOf(sectionId)
-    local current = sectionId
-    while candidate.sections[current].owner ~= ROOT_OWNER do
-      current = candidate.sections[current].owner
+  -- Walk up to find the true root group for each.
+  local function rootGroupOf(groupId)
+    local current = groupId
+    while candidate.groups[current].owner ~= ROOT_OWNER do
+      current = candidate.groups[current].owner
     end
     return current
   end
 
   for accessId, definition in pairs(access.levels) do
-    local entrySectionId = definition.entrySectionId
-    assert(type(entrySectionId) == "string" and entrySectionId ~= "",
+    local entryGroupId = definition.entryGroupId
+    assert(type(entryGroupId) == "string" and entryGroupId ~= "",
       accessId .. " access requires open")
-    assert(candidate.sections[entrySectionId],
-      accessId .. " entry section not found: " .. tostring(entrySectionId))
-    definition.rootSectionId = rootSectionOf(entrySectionId)
+    assert(candidate.groups[entryGroupId],
+      accessId .. " entry group not found: " .. tostring(entryGroupId))
+    definition.rootGroupId = rootGroupOf(entryGroupId)
   end
 
   for pageId, page in pairs(candidate.pages) do
     page.lockedView = access.hasLocked
-      and sectionIsUnder(page.owner, access.levels[ACCESS_LOCKED].rootSectionId,
-        candidate.sections)
+      and groupIsUnder(page.owner, access.levels[ACCESS_LOCKED].rootGroupId,
+        candidate.groups)
   end
 
   if candidate.accessControls and candidate.accessControls.lock then
@@ -958,52 +980,52 @@ local function validateFinal(candidate)
   if access.keypadRequired then
     local kp = candidate.pages[access.keypadPageId]
     assert(kp, "keypad page not found: " .. tostring(access.keypadPageId))
-    assert(sectionIsUnder(kp.owner, access.levels[ACCESS_LOCKED].rootSectionId, candidate.sections),
-      "keypad page must be under the locked root section")
+    assert(groupIsUnder(kp.owner, access.levels[ACCESS_LOCKED].rootGroupId, candidate.groups),
+      "keypad page must be under the locked root group")
     assert(kp.views[ACCESS_LOCKED],
       "keypad page must have a locked view")
   end
 
-  for sectionId, section in pairs(candidate.sections) do
-    local openIds = section.openIds
-    if section.behavior == SECTION_SWITCH then
+  for groupId, group in pairs(candidate.groups) do
+    local openIds = group.openIds
+    if group.behavior == GROUP_SWITCH then
       assert(#openIds <= 1,
-        sectionId .. " is switch mode and open must name one direct member")
+        groupId .. " is switch mode and open must name one direct member")
     end
     for _, memberId in ipairs(openIds) do
       if candidate.pages[memberId] then
-        assert(candidate.pages[memberId].owner == sectionId,
-          sectionId .. " open page " .. memberId .. " is not in this section")
-      elseif candidate.sections[memberId] then
-        assert(candidate.sections[memberId].owner == sectionId,
-          sectionId .. " open section " .. memberId .. " is not owned by this section")
+        assert(candidate.pages[memberId].owner == groupId,
+          groupId .. " open page " .. memberId .. " is not in this group")
+      elseif candidate.groups[memberId] then
+        assert(candidate.groups[memberId].owner == groupId,
+          groupId .. " open group " .. memberId .. " is not owned by this group")
       else
-        error(sectionId .. " open references unknown page or section " .. memberId)
+        error(groupId .. " open references unknown page or group " .. memberId)
       end
     end
   end
 
-  local function collectOpenPages(sectionId, result, visiting)
-    assert(not visiting[sectionId], sectionId .. " has a recursive open")
-    visiting[sectionId] = true
-    for _, memberId in ipairs(candidate.sections[sectionId].openIds) do
+  local function collectOpenPages(groupId, result, visiting)
+    assert(not visiting[groupId], groupId .. " has a recursive open")
+    visiting[groupId] = true
+    for _, memberId in ipairs(candidate.groups[groupId].openIds) do
       if candidate.pages[memberId] then
         result[#result + 1] = memberId
       else
         collectOpenPages(memberId, result, visiting)
       end
     end
-    visiting[sectionId] = nil
+    visiting[groupId] = nil
     return result
   end
 
   if access.hasLocked then
-    local lockedEntrySection = access.levels[ACCESS_LOCKED].entrySectionId
-    local lockedOpenPages = collectOpenPages(lockedEntrySection, {}, {})
-    assert(#lockedOpenPages > 0, lockedEntrySection .. " requires open")
+    local lockedEntryGroup = access.levels[ACCESS_LOCKED].entryGroupId
+    local lockedOpenPages = collectOpenPages(lockedEntryGroup, {}, {})
+    assert(#lockedOpenPages > 0, lockedEntryGroup .. " requires open")
     for _, pageId in ipairs(lockedOpenPages) do
       assert(candidate.pages[pageId].views[ACCESS_LOCKED],
-        lockedEntrySection .. " open page " .. tostring(pageId) .. " must have a locked view")
+        lockedEntryGroup .. " open page " .. tostring(pageId) .. " must have a locked view")
     end
   end
 
@@ -1023,10 +1045,10 @@ local function normalizeProject(project)
 
   local access        = normalizeAccess(project.access)
   local defaultAccess = access.defaultLevelId
-  local rawSections, rawPages = partitionProject(project)
+  local rawGroups, rawPages = partitionProject(project)
 
-  local normalizedSections = normalizeSections(rawSections)
-  local normalizedPages = normalizePages(rawPages, normalizedSections,
+  local normalizedGroups = normalizeGroups(rawGroups)
+  local normalizedPages = normalizePages(rawPages, normalizedGroups,
     defaultAccess)
 
   local candidate = {
@@ -1038,7 +1060,7 @@ local function normalizeProject(project)
     historyControls  = normalizeControls("historyControls",
       project.historyControls, historyControlKeys),
     historyMaxEntries = project.historyMaxEntries,
-    sections          = normalizedSections,
+    groups          = normalizedGroups,
     pages             = normalizedPages,
   }
 
@@ -1156,8 +1178,8 @@ local function bindControls()
     end
   end
 
-  for sectionId, section in pairs(config.sections) do
-    bindNavigationControls(sectionId, section.controls)
+  for groupId, group in pairs(config.groups) do
+    bindNavigationControls(groupId, group.controls)
   end
 
   for pageId, page in pairs(config.pages) do
@@ -1188,18 +1210,22 @@ function Navigator.apply(project)
   assert(not config, "Navigator may be applied only once")
   manifestControlNames = {}
   config = normalizeProject(project)
+  uciPageName = config.uci.pageName or "Main"
+  uciTransition = config.uci.transition or "none"
+  historyMaxEntries = config.historyMaxEntries
+  if historyMaxEntries == nil then historyMaxEntries = 25 end
   initializeAccessLevelControl()
   configureLogging()
   logManifest()
   state.access = config.access.startupLevelId
   state.activePageIds = {}
-  state.activeSectionIds = {}
+  state.activeGroupIds = {}
   visibleLayers        = {}
   visibilityInitialized = false
   historyBack          = {}
   historyForward       = {}
-  activateAccessEntrySection(state.access)
-  updatePageOpenControls()
+  activateAccessEntryGroup(state.access)
+  updateOpenControls()
   reconcileVisibility()
   bindControls()
   updateHistoryControls()

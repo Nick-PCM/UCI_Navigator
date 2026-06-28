@@ -118,7 +118,7 @@ Navigator.configure({
       views = {advanced = {"Home Page", "Advanced Home Overlay", "Advanced Home Modal" } }
     },
 
-    -- Section with a default child. Opening audio activates both audio and
+    -- Group with a default child. Opening audio activates both audio and
     -- volume unless another child behavior closes volume later.
     audio = {
       controls = {

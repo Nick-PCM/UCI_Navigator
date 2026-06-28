@@ -1,7 +1,16 @@
-
 local Navigator = require("Navigator") -- remove in Q-Sys
 
-Navigator.apply({
+local function group(spec)
+  spec.__kind = "group"
+  return spec
+end
+
+local function page(spec)
+  spec.__kind = "page"
+  return spec
+end
+
+local project = {
   uci = { pageName = "Main" },
 
   logging = {
@@ -45,7 +54,7 @@ Navigator.apply({
   },
 
   -- accessGate switches between splash and keypad.
-  accessGate = section({ owner = "root", mode = "switch", open = "splash" }),
+  accessGate = group({ owner = "root", mode = "switch", open = "splash" }),
 
   splash = page({
     owner = "accessGate",
@@ -59,7 +68,7 @@ Navigator.apply({
   }),
 
   -- Session is the root-owned container for unlocked pages.
-  session = section({
+  session = group({
     owner = "root",
     mode = "stack",
     open = { "frame", "system" },
@@ -74,7 +83,7 @@ Navigator.apply({
   }),
 
   -- Tools stack utility pages within the session.
-  tools = section({ owner = "session", mode = "stack" }),
+  tools = group({ owner = "session", mode = "stack" }),
 
   power = page({
     owner = "tools",
@@ -95,7 +104,7 @@ Navigator.apply({
   }),
 
   -- System switches between primary pages.
-  system = section({ owner = "session", mode = "switch", open = "home" }),
+  system = group({ owner = "session", mode = "switch", open = "home" }),
 
   home = page({
     owner = "system",
@@ -103,7 +112,7 @@ Navigator.apply({
     controls = { open = "Open Home Page" },
   }),
 
-  audio = section({
+  audio = group({
     owner = "system",
     mode = "stack",
     open = { "audioBase", "audioPages" },
@@ -115,7 +124,7 @@ Navigator.apply({
     content = { user = "Audio", admin = "Admin Audio" },
   }),
 
-  audioPages = section({ owner = "audio", mode = "switch", open = "audioRouting" }),
+  audioPages = group({ owner = "audio", mode = "switch", open = "audioRouting" }),
 
   audioRouting = page({
     owner = "audioPages",
@@ -129,7 +138,7 @@ Navigator.apply({
     controls = { open = { "Open Audio Settings", "Open Admin Audio Settings" } },
   }),
 
-  video = section({
+  video = group({
     owner = "system",
     mode = "switch",
     open = "videoBase",
@@ -141,7 +150,7 @@ Navigator.apply({
     content = "Video",
   }),
 
-  videoPages = section({ owner = "video", mode = "stack" }),
+  videoPages = group({ owner = "video", mode = "stack" }),
 
   videoRouting = page({
     owner = "videoPages",
@@ -154,4 +163,6 @@ Navigator.apply({
     content = "Video Settings",
     controls = { open = "Open Video Settings", close = "Close Video Settings" },
   }),
-})
+}
+
+Navigator.apply(project)

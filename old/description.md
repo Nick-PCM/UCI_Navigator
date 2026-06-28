@@ -34,20 +34,20 @@ Navigator governs:
 All destinations—including Splash and Keypad—are entries in one keyed `pages` authoring table. Stable page IDs are separate from Q-SYS layer names.
 
 - A root page has no `parentId`.
-- An unlocked root page is called a section and has a default view.
-- A child may reference a section or another child through `parentId`.
-- Hierarchy is limited to section, subpage, and sub-subpage.
+- An unlocked root page is called a group and has a default view.
+- A child may reference a group or another child through `parentId`.
+- Hierarchy is limited to group, subpage, and sub-subpage.
 - Parent cycles and deeper hierarchies are rejected during configuration.
 - Only one root page is active at a time.
 - Closing a child also closes its active descendants; its parent remains active.
-- Closing a root section returns to the current access state's home page.
+- Closing a root group returns to the current access state's home page.
 - Page navigation history is maintained for page open/close changes.
 
 A parent uses `childDisplayMode` to allow one or multiple direct children. `SINGLE` is the default and closes active sibling branches when another child opens. `MULTIPLE` preserves active siblings.
 
 A child hides its parent's physical view by default. The parent remains logically active, so closing the child returns to it. If the child should show the parent underneath, include the parent's layer name in the child view. A child may also set `parentVisibility = Navigator.ParentVisibility.KEEP` to keep the parent's resolved view visible automatically.
 
-A section may specify a direct default-capable `defaultChildId`. Opening that section, including as the default home page, activates the child automatically.
+A group may specify a direct default-capable `defaultChildId`. Opening that group, including as the default home page, activates the child automatically.
 
 ## Authoring Shape
 
@@ -116,7 +116,7 @@ Navigator has two reserved access values: `locked` and `default`. They must be p
 
 - Locked starts at the configured locked default, normally Splash.
 - Locked pages such as Splash and Keypad are ordinary configured pages.
-- Locked can transition to default or a configured custom access level, opening the configured default section and rendering it for the requested access.
+- Locked can transition to default or a configured custom access level, opening the configured default group and rendering it for the requested access.
 - Default can transition to a custom access level while preserving active pages.
 - A custom access level can transition to default while preserving pages with default views and closing unavailable branches.
 - Default or any custom access level can transition to locked, which restores the locked default page.
@@ -245,7 +245,7 @@ pages = {
 }
 ```
 
-`controls.open` calls `Navigator.openPage(pageId)`. Open controls may be toggle buttons; Navigator sets each configured open control's `Boolean` value from the active page state after navigation, history movement, access changes, keypad changes, and initial configuration. `controls.close` calls `Navigator.closePage(pageId)`, except the keypad page closes through keypad behavior. Closing a child closes that branch. Closing a root section returns to the locked home page while locked, or the default home page while default/custom access is active. `controls.continue` changes directly to default access for no-keypad projects. `controls.openKeypad` and `controls.closeKeypad` are available only when `access.keypadRequired` is `true`.
+`controls.open` calls `Navigator.openPage(pageId)`. Open controls may be toggle buttons; Navigator sets each configured open control's `Boolean` value from the active page state after navigation, history movement, access changes, keypad changes, and initial configuration. `controls.close` calls `Navigator.closePage(pageId)`, except the keypad page closes through keypad behavior. Closing a child closes that branch. Closing a root group returns to the locked home page while locked, or the default home page while default/custom access is active. `controls.continue` changes directly to default access for no-keypad projects. `controls.openKeypad` and `controls.closeKeypad` are available only when `access.keypadRequired` is `true`.
 
 Page open and close operations record page-set history when they change the active page set. Access changes, locked-state resets, keypad open/close actions, keypad timeout, session timeout, and direct no-keypad continue clear both history stacks. Repeated writes of the current unlocked access value do not clear history. Keypad screens are not back/forward navigable, and back/forward are no-ops while the keypad is showing.
 
@@ -316,7 +316,7 @@ Standard controls are normally declared in `Navigator.configure(...)` instead of
 
 - `setAccess` changes authorization and applies its transition rules.
 - `openPage` derives root or child behavior from page configuration.
-- `closePage` closes an active child branch or returns an active root section to the current access state's home page.
+- `closePage` closes an active child branch or returns an active root group to the current access state's home page.
 - `back` restores the previous active page set when available.
 - `forward` restores the next active page set after a back operation.
 

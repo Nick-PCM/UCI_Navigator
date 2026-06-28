@@ -103,7 +103,7 @@ Navigator.configure({
       views = { locked = { "Keypad" } },
     },
 
-    -- Root pages without parentId are sections. controls.open navigates to
+    -- Root pages without parentId are groups. controls.open navigates to
     -- the page and replaces the currently active root page.
     home = {
       controls = {
@@ -112,7 +112,7 @@ Navigator.configure({
       views = { default = { "Home Page" } },
     },
 
-    -- Opening this section also opens its default child. The child must be a
+    -- Opening this group also opens its default child. The child must be a
     -- direct child and must have a default-capable view.
     audio = {
       controls = {
@@ -134,7 +134,7 @@ Navigator.configure({
     },
 
     -- Pages can be simple: a nav control plus one default view is enough.
-    -- A section close control returns to the default home page.
+    -- A group close control returns to the default home page.
     settings = {
       controls = {
         open = Controls["Control_Nav"],

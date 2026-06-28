@@ -733,11 +733,11 @@ local function validateConfig(candidate)
         or parentVisibility == Navigator.ParentVisibility.HIDE,
       pageId .. " has an invalid parentVisibility")
     assert(parentVisibility == nil or page.parentId,
-      pageId .. " is a section and cannot set parentVisibility")
+      pageId .. " is a group and cannot set parentVisibility")
 
     if page.defaultChildId then
       assert(not page.parentId,
-        pageId .. " is not a section and cannot set defaultChildId")
+        pageId .. " is not a group and cannot set defaultChildId")
       local child = candidate.pages[page.defaultChildId]
       assert(child and child.parentId == pageId,
         pageId .. " defaultChildId must identify a direct child")
@@ -807,7 +807,7 @@ function Navigator.setAccess(targetAccess)
   restartSessionTimer()
 end
 
--- Open a configured page ID and apply section/child behavior from config.
+-- Open a configured page ID and apply group/child behavior from config.
 function Navigator.openPage(pageId)
   assert(config, "configure Navigator before navigating")
 
@@ -856,7 +856,7 @@ function Navigator.openPage(pageId)
   recordHistory(beforePageIds)
 end
 
--- Close an active page. Child pages close their branch; root sections return
+-- Close an active page. Child pages close their branch; root groups return
 -- to the home page for the current access state.
 function Navigator.closePage(pageId)
   assert(config, "configure Navigator before navigating")

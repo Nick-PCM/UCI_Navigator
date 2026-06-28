@@ -1,6 +1,6 @@
 # UCI Navigator
 
-UCI Navigator is a Lua navigation runtime for Q-SYS UCIs. It gives a UCI script a small authored model for pages, sections, access levels, timers, history, and controls, then keeps Q-SYS layer visibility synchronized with that model.
+UCI Navigator is a Lua navigation runtime for Q-SYS UCIs. It gives a UCI script a small authored model for pages, groups, access levels, timers, history, and controls, then keeps Q-SYS layer visibility synchronized with that model.
 
 Navigator uses the word `page` for a navigation state. The Q-SYS assets it actually manages are UCI layers named in each page's `content`.
 
@@ -8,7 +8,7 @@ Navigator uses the word `page` for a navigation state. The Q-SYS assets it actua
 
 Q-SYS UCIs often start as direct button-to-layer scripts. That becomes hard to maintain when a design needs:
 
-- switching sections, tabs, or destinations
+- switching groups, tabs, or destinations
 - persistent frame layers such as headers, footers, ribbons, and backgrounds
 - tool panels, overlays, dialogs, or modals that can coexist with other pages
 - locked and unlocked views
@@ -23,26 +23,26 @@ Navigator centralizes those rules in one project table and derives layer visibil
 
 Navigator projects use explicit ownership:
 
-- Sections and pages are top-level entries in the authored project table.
-- Every section and page has an explicit `owner`.
-- Every section has a `mode`: `switch` keeps one direct member active, while `stack` allows direct members to coexist.
+- Groups and pages are top-level entries in the authored project table.
+- Every group and page has an explicit `owner`.
+- Every group has a `mode`: `switch` keeps one direct member active, while `stack` allows direct members to coexist.
 - `owner`, `open`, and `keypad` use Navigator IDs.
 - `content` strings are Q-SYS UCI layer names.
 - Control strings are Q-SYS control names.
 
 ```lua
-system = section({ owner = "root", mode = "switch", open = "home" })
+system = group({ owner = "root", mode = "switch", open = "home" })
 home = page({ owner = "system", content = "Home Layer" })
 ```
 
 ## Key Capabilities
 
-- Switch and stack sections.
-- Section-owned subnavigation with pages that show Q-SYS layers.
+- Switch and stack groups.
+- Group-owned subnavigation with pages that show Q-SYS layers.
 - Access-specific content, with fallback to the default unlocked access level.
 - Locked access with optional keypad.
 - Session and keypad timeout handling.
-- Page/section open/close controls, access controls, and history controls.
+- Page/group open/close controls, access controls, and history controls.
 - Multiple Q-SYS controls can be wired to the same Navigator action.
 - Manifest logging for configured layer/control names.
 - Q-SYS layer-call diagnostics when layer names do not match the UCI.
@@ -58,17 +58,17 @@ home = page({ owner = "system", content = "Home Layer" })
 
 ## Start Here
 
-Read [Navigator.md](Navigator.md) for the model and API details, then compare it with [example-uci.lua](example-uci.lua). The example shows the current authored style with locked access, a keypad, persistent frame layers, a switch system section, stack tools, and nested section subpages.
+Read [Navigator.md](Navigator.md) for the model and API details, then compare it with [example-uci.lua](example-uci.lua). The example shows the current authored style with locked access, a keypad, persistent frame layers, a switch system group, stack tools, and nested group subpages.
 
 Locked access is optional. A project with no lockscreen can omit `access.locked`; Navigator starts at the default access level instead.
 
 ## Q-SYS Without Require
 
-Q-SYS scripts cannot load `Navigator.lua` with `require`. Keep the project at the top of the script, add tiny local `section` and `page` helpers, then paste the Navigator implementation below it.
+Q-SYS scripts cannot load `Navigator.lua` with `require`. Keep the project at the top of the script, add tiny local `group` and `page` helpers, then paste the Navigator implementation below it.
 
 ```lua
-local function section(spec)
-  spec.__kind = "section"
+local function group(spec)
+  spec.__kind = "group"
   return spec
 end
 
@@ -80,9 +80,9 @@ end
 local project = {
   uci = { pageName = "Main" },
 
-  accessGate = section({ owner = "root", mode = "switch", open = "splash" }),
-  session = section({ owner = "root", mode = "stack", open = { "frame", "system" } }),
-  system = section({ owner = "session", mode = "switch", open = "home" }),
+  accessGate = group({ owner = "root", mode = "switch", open = "splash" }),
+  session = group({ owner = "root", mode = "stack", open = { "frame", "system" } }),
+  system = group({ owner = "session", mode = "switch", open = "home" }),
 
   splash = page({ owner = "accessGate", content = { locked = "Splash" } }),
   frame = page({ owner = "session", content = "Frame" }),
